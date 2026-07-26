@@ -1,0 +1,26 @@
+# --- Credenciales y datos: NUNCA subir al repositorio ---
+.env
+*/.env
+cspapeleria/.env
+
+# Bases de datos locales
+*.db
+*.sqlite
+*.sqlite3
+
+# Certificados HTTPS autofirmados (se generan en cada máquina)
+cert.pem
+key.pem
+*/cert.pem
+*/key.pem
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+env/
+
+# Sistema
+.DS_Store
+Thumbs.db

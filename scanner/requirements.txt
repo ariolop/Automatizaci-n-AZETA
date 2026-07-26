@@ -1,0 +1,7 @@
+Flask>=3.0
+gunicorn>=21.2
+requests>=2.31
+beautifulsoup4>=4.12
+lxml>=5.0
+curl_cffi>=0.6
+cryptography>=42.0

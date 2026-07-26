@@ -1,0 +1,72 @@
+<?php
+/**
+ * Front controller: listado
+ * Devuelve los productos de la tienda (id, ean13, nombre, activo) para el monitor.
+ *
+ * Endpoint:
+ *   {shop}/index.php?fc=module&module=azetaconnector&controller=listado
+ *
+ * Cuerpo (JSON, POST):  { "token": "...", "solo_con_ean": true }
+ */
+
+if (!defined('_PS_VERSION_')) {
+    exit;
+}
+
+class AzetaConnectorListadoModuleFrontController extends ModuleFrontController
+{
+    public $auth = false;
+    public $guestAllowed = true;
+    public $ssl = true;
+
+    public function initContent()
+    {
+        parent::initContent();
+
+        $raw = Tools::file_get_contents('php://input');
+        $in = json_decode($raw, true);
+        if (!is_array($in)) {
+            $in = [];
+        }
+
+        $token = isset($in['token']) ? $in['token'] : Tools::getValue('token');
+        if (!hash_equals((string) Configuration::get('AZETACONNECTOR_TOKEN'), (string) $token)) {
+            $this->responder(['success' => false, 'error' => 'Token no autorizado'], 401);
+        }
+
+        $idLang = (int) Configuration::get('PS_LANG_DEFAULT');
+        $soloConEan = !isset($in['solo_con_ean']) || $in['solo_con_ean'];
+
+        $sql = 'SELECT p.id_product, p.ean13, p.active, pl.name
+                FROM ' . _DB_PREFIX_ . 'product p
+                JOIN ' . _DB_PREFIX_ . 'product_lang pl
+                  ON pl.id_product = p.id_product AND pl.id_lang = ' . $idLang;
+        if (Shop::isFeatureActive()) {
+            $sql .= ' AND pl.id_shop = ' . (int) Context::getContext()->shop->id;
+        }
+        if ($soloConEan) {
+            $sql .= " WHERE p.ean13 <> ''";
+        }
+        $sql .= ' GROUP BY p.id_product ORDER BY pl.name';
+
+        $rows = Db::getInstance()->executeS($sql);
+        $productos = [];
+        foreach ($rows as $r) {
+            $productos[] = [
+                'id' => (int) $r['id_product'],
+                'ean13' => $r['ean13'],
+                'nombre' => $r['name'],
+                'activo' => (int) $r['active'] === 1,
+            ];
+        }
+
+        $this->responder(['success' => true, 'total' => count($productos), 'productos' => $productos]);
+    }
+
+    private function responder(array $data, int $code = 200)
+    {
+        header('Content-Type: application/json; charset=utf-8');
+        http_response_code($code);
+        die(json_encode($data, JSON_UNESCAPED_UNICODE));
+    }
+}

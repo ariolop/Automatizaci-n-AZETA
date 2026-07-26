@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>AZETA Manager</title>
+  <style>
+    :root { --az:#0a5; --azd:#073; --bg:#f5f6f8; --bd:#e2e5ea; --tx:#222; --mut:#777; }
+    * { box-sizing:border-box; }
+    body { margin:0; font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;
+           background:var(--bg); color:var(--tx); }
+    header { background:var(--azd); color:#fff; padding:0 20px; display:flex; align-items:center; gap:24px; }
+    header h1 { font-size:18px; margin:0; padding:16px 0; }
+    header nav a { color:#cfe; text-decoration:none; padding:18px 6px; display:inline-block; font-weight:600; }
+    header nav a.active, header nav a:hover { color:#fff; border-bottom:3px solid #fff; }
+    main { max-width:980px; margin:24px auto; padding:0 20px; }
+    .card { background:#fff; border:1px solid var(--bd); border-radius:10px; padding:20px; margin-bottom:20px; }
+    h2 { margin-top:0; font-size:17px; }
+    input[type=text], input[type=search] { padding:10px 12px; border:1px solid var(--bd); border-radius:8px;
+        font-size:15px; width:100%; }
+    .row { display:flex; gap:12px; align-items:center; flex-wrap:wrap; }
+    button, .btn { background:var(--az); color:#fff; border:0; padding:10px 16px; border-radius:8px;
+        font-size:15px; font-weight:600; cursor:pointer; }
+    button.sec { background:#eef; color:var(--azd); border:1px solid #cdd; }
+    button.danger { background:#e44; }
+    label.chk { display:flex; align-items:center; gap:8px; font-size:14px; color:#444; cursor:pointer; }
+    table { width:100%; border-collapse:collapse; }
+    th, td { text-align:left; padding:9px 10px; border-bottom:1px solid var(--bd); font-size:14px; }
+    th { color:var(--mut); font-weight:600; }
+    .pill { padding:3px 9px; border-radius:20px; font-size:12px; font-weight:700; }
+    .ok-pill { background:#dfe; color:#063; }
+    .bad-pill { background:#fde; color:#900; }
+    .unk-pill { background:#eee; color:#666; }
+    .warn-pill { background:#fff0d0; color:#a60; }
+    .flash { padding:11px 14px; border-radius:8px; margin-bottom:10px; font-size:14px; }
+    .flash.ok { background:#e6f7ec; color:#0a5; }
+    .flash.error { background:#fdecec; color:#c33; }
+    .flash.warn { background:#fff6e0; color:#a60; }
+    .muted { color:var(--mut); font-size:13px; }
+    .ficha { display:flex; gap:20px; }
+    .ficha img.main { width:180px; height:auto; border:1px solid var(--bd); border-radius:8px; cursor:zoom-in; }
+    .thumbs { display:flex; gap:8px; margin-top:10px; flex-wrap:wrap; }
+    .thumbs img { width:64px; height:64px; object-fit:contain; border:1px solid var(--bd); border-radius:6px; cursor:zoom-in; }
+    .thumbs img:hover, .ficha img.main:hover { border-color:var(--az); }
+    .costbox { display:flex; gap:20px; flex-wrap:wrap; margin:6px 0 4px; }
+    .costbox .item { background:#f0f7f3; border:1px solid #d6e8de; border-radius:8px; padding:8px 14px; }
+    .costbox .item .lab { font-size:11px; color:#577; text-transform:uppercase; letter-spacing:.03em; }
+    .costbox .item .val { font-size:20px; font-weight:800; color:var(--azd); }
+    .costbox .item.alt .val { color:#333; font-size:16px; }
+    .price { font-size:22px; font-weight:800; color:var(--azd); }
+    .badge { display:inline-block; background:#eef; color:#456; padding:2px 8px; border-radius:6px; font-size:12px; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>📦 AZETA Manager</h1>
+    <nav>
+      <a href="{{ url_for('buscar') }}" class="{{ 'active' if request.endpoint=='buscar' else '' }}">Buscar / Publicar</a>
+      <a href="{{ url_for('lote') }}" class="{{ 'active' if request.endpoint=='lote' else '' }}">Lote</a>
+      <a href="{{ url_for('monitor') }}" class="{{ 'active' if request.endpoint=='monitor' else '' }}">Monitor</a>
+      <a href="{{ url_for('configuracion') }}" class="{{ 'active' if request.endpoint=='configuracion' else '' }}">Configuración</a>
+    </nav>
+  </header>
+
+  <!-- Lightbox para ver imágenes en grande -->
+  <div id="lightbox" onclick="cerrarLightbox()"
+       style="display:none; position:fixed; inset:0; background:rgba(0,0,0,.85);
+              z-index:9999; align-items:center; justify-content:center; cursor:zoom-out;">
+    <img id="lightbox-img" src="" alt=""
+         style="max-width:92vw; max-height:92vh; border-radius:8px; box-shadow:0 4px 40px rgba(0,0,0,.6);">
+  </div>
+  <script>
+    function abrirLightbox(src){
+      document.getElementById('lightbox-img').src = src;
+      document.getElementById('lightbox').style.display = 'flex';
+    }
+    function cerrarLightbox(){
+      document.getElementById('lightbox').style.display = 'none';
+    }
+    document.addEventListener('keydown', function(e){ if(e.key==='Escape') cerrarLightbox(); });
+  </script>
+  <main>
+    {% with messages = get_flashed_messages(with_categories=true) %}
+      {% for cat, msg in messages %}
+        <div class="flash {{ cat }}">{{ msg }}</div>
+      {% endfor %}
+    {% endwith %}
+    {% block content %}{% endblock %}
+  </main>
+</body>
+</html>

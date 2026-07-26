@@ -1,0 +1,76 @@
+{% extends "base.html" %}
+{% block content %}
+
+<div class="card">
+  <div class="row" style="justify-content:space-between;">
+    <h2 style="margin:0;">Monitor de disponibilidad</h2>
+    <div class="row">
+      <span class="badge">Vigilados: {{ resumen.total }}</span>
+      {% if resumen.desaparecidos %}
+        <span class="pill bad-pill">{{ resumen.desaparecidos }} desaparecidos</span>
+      {% else %}
+        <span class="pill ok-pill">Todo disponible</span>
+      {% endif %}
+    </div>
+  </div>
+
+  <div class="row" style="margin-top:14px;">
+    <form method="post" action="{{ url_for('monitor_comprobar') }}">
+      <button type="submit">Comprobar ahora</button>
+      {% if ps_ok %}
+        <label class="chk" style="display:inline-flex; margin-left:8px;">
+          <input type="checkbox" name="sync_prestashop"> sincronizar antes con PrestaShop
+        </label>
+      {% endif %}
+    </form>
+    {% if ps_ok %}
+    <form method="post" action="{{ url_for('monitor_sincronizar') }}">
+      <button type="submit" class="sec">Importar productos de PrestaShop</button>
+    </form>
+    {% endif %}
+  </div>
+</div>
+
+<div class="card">
+  <h2>Añadir EAN a vigilar</h2>
+  <form method="post" action="{{ url_for('monitor_añadir') }}" class="row">
+    <div style="flex:1; min-width:240px;"><input type="text" name="ean" placeholder="EAN…"></div>
+    <button type="submit" class="sec">Añadir</button>
+  </form>
+</div>
+
+<div class="card">
+  {% if vigilados %}
+  <table>
+    <thead>
+      <tr><th>Estado</th><th>EAN</th><th>Nombre</th><th>Origen</th><th>Última revisión</th><th></th></tr>
+    </thead>
+    <tbody>
+      {% for v in vigilados %}
+      <tr>
+        <td>
+          {% if v.ultimo_estado == 'disponible' %}<span class="pill ok-pill">Disponible</span>
+          {% elif v.ultimo_estado == 'desaparecido' %}<span class="pill bad-pill">Desaparecido</span>
+          {% elif v.ultimo_estado == 'agotado' %}<span class="pill bad-pill">Agotado</span>
+          {% else %}<span class="pill unk-pill">Sin comprobar</span>{% endif %}
+        </td>
+        <td>{{ v.ean }}</td>
+        <td>{{ v.nombre or '—' }}</td>
+        <td><span class="muted">{{ v.origen }}</span></td>
+        <td class="muted">{{ v.ultima_revision or '—' }}</td>
+        <td>
+          <form method="post" action="{{ url_for('monitor_quitar', ean=v.ean) }}" style="display:inline;"
+                onsubmit="return confirm('¿Quitar {{ v.ean }} del monitor?');">
+            <button type="submit" class="danger" style="padding:5px 10px;">Quitar</button>
+          </form>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+    <p class="muted">No hay productos vigilados todavía. Añade un EAN arriba, o impórtalos desde PrestaShop.</p>
+  {% endif %}
+</div>
+
+{% endblock %}

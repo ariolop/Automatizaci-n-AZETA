@@ -1,0 +1,50 @@
+{% extends "base.html" %}
+{% set seccion = "buscar" %}
+{% block contenido %}
+<div class="card">
+  <form method="post" action="/buscar" class="row">
+    <input type="text" name="patron" placeholder="EAN o texto del producto" autofocus
+           value="{{ r.patron if r else '' }}">
+    <div style="flex:0 0 auto"><button type="submit">Buscar</button></div>
+  </form>
+</div>
+
+{% if r %}
+  {% if r.encontrado %}
+  <div class="card">
+    <div class="row">
+      <div style="flex:0 0 130px">
+        {% if r.imagenes %}<img src="{{ r.imagenes[0] }}" style="width:120px;height:120px;object-fit:contain;border:1px solid #e2e5ea;border-radius:8px;background:#fff">{% endif %}
+      </div>
+      <div style="flex:1">
+        <h2 style="margin:0 0 6px">{{ r.nombre or '(sin nombre)' }}</h2>
+        <div class="muted">cod {{ r.codProduct }} · marca {{ r.marca or '—' }}
+          {% if r.disponible %}<span class="badge b-ok">Disponible · {{ r.stock }} uds</span>
+          {% else %}<span class="badge b-no">Sin stock</span>{% endif %}
+        </div>
+        <div class="muted" style="margin-top:4px">
+          {% if r.eans_detalle %}
+            {% for e in r.eans_detalle %}
+              EAN {{ e.tipo }}{% if e.cantidad and e.tipo == 'Caja' %} ({{ e.cantidad }} uds){% endif %}: <b>{{ e.ean }}</b>{% if not loop.last %} · {% endif %}
+            {% endfor %}
+          {% else %}EAN {{ r.ean }}{% endif %}
+        </div>
+        <div class="grid-precio">
+          <div><span>Precio neto (s/IVA)</span><b>{{ '%.2f'|format(r.precio_neto) if r.precio_neto is not none else '—' }} €</b></div>
+          <div><span>Coste real (IVA {{ r.iva }}%{% if r.recargo %} + rec {{ r.recargo }}%{% endif %})</span><b>{{ '%.4f'|format(r.coste_real) if r.coste_real is not none else '—' }} €</b></div>
+        </div>
+      </div>
+    </div>
+    {% if r.descripcion %}<p class="muted" style="margin-top:16px">{{ r.descripcion }}</p>{% endif %}
+    {% if r.imagenes and r.imagenes|length > 1 %}
+      <div class="row" style="margin-top:10px">
+        {% for img in r.imagenes[1:] %}<a href="{{img}}" target="_blank" style="flex:0 0 auto"><img class="thumb" src="{{img}}"></a>{% endfor %}
+      </div>
+    {% endif %}
+  </div>
+  {% else %}
+  <div class="card"><span class="badge b-no">No encontrado</span>
+    <span class="muted"> {{ r.motivo or 'la búsqueda no devolvió un producto para ese código.' }}</span></div>
+  {% endif %}
+{% endif %}
+{% endblock %}

@@ -1,0 +1,39 @@
+{% extends "base.html" %}
+{% set seccion = "monitor" %}
+{% block contenido %}
+<div class="card">
+  <div class="row">
+    <form method="post" action="/monitor/add" style="flex:1;display:flex;gap:10px">
+      <input type="text" name="eans" placeholder="Añadir EAN(s) a vigilar">
+      <button type="submit" style="flex:0 0 auto">Añadir</button>
+    </form>
+    <form method="post" action="/monitor/run" style="flex:0 0 auto">
+      <button type="submit" class="btn-sec">Comprobar ahora</button>
+    </form>
+  </div>
+</div>
+
+<div class="card">
+  <table>
+    <thead><tr><th>EAN</th><th>Estado</th><th>Stock</th><th>Neto</th><th>Coste</th><th>Nombre</th><th></th></tr></thead>
+    <tbody>
+      {% for v in vigilados %}
+      <tr>
+        <td>{{ v.ean }}</td>
+        <td>{% if v.estado=='disponible' %}<span class="badge b-ok">disponible</span>
+            {% elif v.estado=='agotado' %}<span class="badge b-warn">agotado</span>
+            {% elif v.estado=='desaparecido' %}<span class="badge b-no">desaparecido</span>
+            {% else %}<span class="muted">sin comprobar</span>{% endif %}</td>
+        <td>{{ v.stock if v.stock is not none else '—' }}</td>
+        <td>{{ '%.2f'|format(v.precio_neto) ~ ' €' if v.precio_neto is not none else '—' }}</td>
+        <td>{{ '%.4f'|format(v.coste_real) ~ ' €' if v.coste_real is not none else '—' }}</td>
+        <td>{{ v.nombre or '' }}</td>
+        <td><a href="/monitor/rm/{{ v.ean }}" class="muted">quitar</a></td>
+      </tr>
+      {% else %}
+      <tr><td colspan="7" class="muted">No hay productos vigilados todavía.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

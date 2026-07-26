@@ -1,0 +1,193 @@
+{% extends "base.html" %}
+{% block content %}
+
+<div class="card">
+  <h2>Procesar lote de EANs</h2>
+  <p class="muted">Pega una lista de EANs (separados por coma, espacio o salto de línea) o sube un CSV/Excel.
+     El proceso corre en segundo plano: verás el progreso en vivo sin esperas ni timeouts.</p>
+
+  <form id="loteForm">
+    <textarea name="eans" id="eans" rows="5" placeholder="8411574036708, 8712645316959&#10;9788419986860 …"
+      style="width:100%; padding:10px 12px; border:1px solid var(--bd); border-radius:8px; font-size:14px; font-family:monospace;"></textarea>
+
+    <div class="row" style="margin-top:12px; gap:16px; align-items:flex-end;">
+      <div>
+        <label class="muted">…o sube un archivo (.csv, .xlsx, .txt)</label><br>
+        <input type="file" name="archivo" id="archivo" accept=".csv,.xlsx,.txt">
+      </div>
+      <div>
+        <label class="muted">Columna de EANs</label><br>
+        <input type="text" name="columna" id="columna" placeholder="ej. A o 1 (vacío = todas)" style="width:160px;">
+      </div>
+      <div>
+        <label class="muted">Fila inicial</label><br>
+        <input type="number" name="fila_inicial" id="fila_inicial" value="1" min="1" style="width:100px;">
+      </div>
+    </div>
+    <p class="muted" style="margin:6px 0 0;">La columna y la fila inicial solo se aplican a los archivos
+       (útil para saltar cabeceras o elegir la columna correcta).</p>
+
+    <div class="row" style="margin-top:14px;">
+      <label class="chk"><input type="checkbox" name="añadir_vigilado"> Añadir al monitor los disponibles</label>
+      <label class="chk"><input type="checkbox" name="subir_prestashop" id="chkSubir" {{ '' if ps_ok else 'disabled' }}>
+        Subir a PrestaShop los disponibles (desactivados){% if not ps_ok %}<span class="muted">— PrestaShop sin configurar</span>{% endif %}</label>
+      <label class="chk" title="Útil cuando NO subes: te da la lista de candidatos">
+        <input type="checkbox" name="generar_csv" {{ '' if ps_ok else 'disabled' }}>
+        Generar CSV con los EANs que NO están en PrestaShop</label>
+    </div>
+
+    <div style="margin-top:16px;">
+      <button type="submit" id="btnProcesar">Procesar lote</button>
+      <span id="msgInicio" class="muted" style="margin-left:10px;"></span>
+    </div>
+  </form>
+</div>
+
+<div class="card" id="progresoCard" style="display:none;">
+  <div class="row" style="justify-content:space-between;">
+    <h2 style="margin:0;">Progreso</h2>
+    <div id="contadores" class="row" style="gap:8px;"></div>
+  </div>
+  <div style="background:#eef0f3; border-radius:8px; height:18px; margin:14px 0; overflow:hidden;">
+    <div id="barra" style="background:var(--az); height:100%; width:0%; transition:width .3s;"></div>
+  </div>
+  <p id="estadoTexto" class="muted" style="margin:0 0 12px;"></p>
+
+  <div id="barraAcciones" class="row" style="display:none; gap:12px; margin-bottom:12px; align-items:center;">
+    <label class="chk"><input type="checkbox" id="selAll"> Seleccionar todos</label>
+    <button type="button" id="btnSubirSel" class="sec" {{ '' if ps_ok else 'disabled' }}>Subir seleccionados a PrestaShop</button>
+    <a id="btnCsv" class="btn" style="display:none;" href="#">⬇ Descargar CSV (no en PrestaShop)</a>
+    <span id="msgSel" class="muted"></span>
+  </div>
+
+  <table>
+    <thead><tr><th style="width:34px;"></th><th style="width:166px;"></th><th>EAN</th><th>Producto</th><th>AZETA</th><th>Acción</th></tr></thead>
+    <tbody id="filas"></tbody>
+  </table>
+</div>
+
+<script>
+const form = document.getElementById('loteForm');
+const btn = document.getElementById('btnProcesar');
+let intervalo = null;
+let jobActual = null;
+
+// Estados cuyo producto es candidato a subir (disponible en AZETA y NO en PrestaShop)
+const SUBIBLE = 'disponible';
+
+async function lanzar(formData){
+  btn.disabled = true;
+  document.getElementById('msgInicio').textContent = 'Iniciando…';
+  document.getElementById('barraAcciones').style.display = 'none';
+  document.getElementById('btnCsv').style.display = 'none';
+  document.getElementById('selAll').checked = false;
+  try {
+    const r = await fetch('{{ url_for("lote_iniciar") }}', { method:'POST', body: formData });
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.error || 'Error al iniciar');
+    document.getElementById('msgInicio').textContent = data.total + ' EANs en cola.';
+    document.getElementById('progresoCard').style.display = 'block';
+    jobActual = data.job_id;
+    if (intervalo) clearInterval(intervalo);
+    intervalo = setInterval(() => sondear(data.job_id), 1500);
+    sondear(data.job_id);
+  } catch(err) {
+    document.getElementById('msgInicio').textContent = '⚠ ' + err.message;
+    btn.disabled = false;
+  }
+}
+
+form.addEventListener('submit', function(e){ e.preventDefault(); lanzar(new FormData(form)); });
+
+// Subir seleccionados: arranca un NUEVO job con esos EANs y subida activada
+document.getElementById('btnSubirSel').addEventListener('click', function(){
+  const sel = [...document.querySelectorAll('.sel:checked')].map(c => c.value);
+  if (!sel.length){ document.getElementById('msgSel').textContent = 'No has seleccionado ninguno.'; return; }
+  const fd = new FormData();
+  fd.append('eans', sel.join(','));
+  fd.append('subir_prestashop', 'on');
+  lanzar(fd);
+});
+
+document.getElementById('selAll').addEventListener('change', function(){
+  document.querySelectorAll('.sel').forEach(c => { c.checked = this.checked; });
+  actualizarMsgSel();
+});
+function actualizarMsgSel(){
+  const n = document.querySelectorAll('.sel:checked').length;
+  document.getElementById('msgSel').textContent = n ? (n + ' seleccionados') : '';
+}
+
+const PILL = {
+  disponible:['ok-pill','Disponible'], subido:['ok-pill','Disponible'], ya_existe:['ok-pill','Disponible'],
+  no_disponible:['bad-pill','No disponible'], no_encontrado:['bad-pill','No encontrado'],
+  error:['bad-pill','Error'], error_subida:['ok-pill','Disponible'], pendiente:['unk-pill','…']
+};
+
+function accionTexto(it){
+  switch(it.estado){
+    case 'subido': return '✅ Subido (ID ' + it.id_product + (it.disponible_pedido===false ? ', sin pedido' : '') + ')';
+    case 'ya_existe': return '⚠ Ya en PrestaShop (ID ' + it.id_product + (it.activo_ps===false ? ', inactivo' : '') + ')';
+    case 'error_subida': return '⚠ Error al subir: ' + (it.detalle||'');
+    case 'disponible': return '<span class="muted">candidato a subir</span>';
+    case 'error': return '⚠ ' + (it.detalle||'');
+    case 'pendiente': return '';
+    default: return 'Omitido';
+  }
+}
+
+async function sondear(jid){
+  try {
+    const r = await fetch('{{ url_for("lote_estado", jid="JID") }}'.replace('JID', jid));
+    const job = await r.json();
+    if (job.error) return;
+    const pct = job.total ? Math.round(job.procesados / job.total * 100) : 0;
+    document.getElementById('barra').style.width = pct + '%';
+    document.getElementById('estadoTexto').textContent =
+      job.procesados + ' / ' + job.total + (job.estado === 'terminado' ? ' — completado' : ' — procesando…')
+      + (job.aviso ? '  ·  ' + job.aviso : '');
+
+    const rs = job.resumen || {};
+    document.getElementById('contadores').innerHTML =
+      '<span class="pill ok-pill">Disponibles: ' + (rs.disponibles||0) + '</span>' +
+      '<span class="pill ok-pill">Subidos: ' + (rs.subidos||0) + '</span>' +
+      '<span class="pill warn-pill">Ya en PS: ' + (rs.ya_existen||0) + '</span>' +
+      '<span class="pill bad-pill">No disp.: ' + (rs.no_disponibles||0) + '</span>' +
+      '<span class="pill bad-pill">Errores: ' + (rs.errores||0) + '</span>';
+
+    document.getElementById('filas').innerHTML = job.items.map(it => {
+      const [cls,label] = PILL[it.estado] || PILL.pendiente;
+      const nombre = it.nombre ? it.nombre : (it.estado==='pendiente' ? '<span class="muted">en cola…</span>' : '—');
+      const ds = it.dropshipping === false ? ' <span class="badge">sin DS</span>' : '';
+      const img = it.imagen
+        ? '<img src="' + it.imagen + '" alt="" loading="lazy" style="width:150px;height:150px;object-fit:contain;border:1px solid var(--bd);border-radius:6px;cursor:zoom-in;background:#fff;" onclick="abrirLightbox(this.src)">'
+        : '<span class="muted" style="font-size:18px;">·</span>';
+      const chk = it.estado === SUBIBLE
+        ? '<input type="checkbox" class="sel" value="' + it.ean + '" onchange="actualizarMsgSel()">'
+        : '';
+      return '<tr><td>' + chk + '</td><td>' + img + '</td><td>' + it.ean + '</td><td>' + nombre + ds +
+             '</td><td><span class="pill ' + cls + '">' + label + '</span></td><td>' + accionTexto(it) + '</td></tr>';
+    }).join('');
+
+    if (job.estado === 'terminado') {
+      clearInterval(intervalo); intervalo = null;
+      btn.disabled = false;
+      // Barra de acciones: aparece si hay candidatos a subir
+      const hayCandidatos = job.items.some(it => it.estado === SUBIBLE);
+      document.getElementById('barraAcciones').style.display = hayCandidatos ? 'flex' : 'none';
+      // Botón CSV: si se pidió generar CSV y hay candidatos
+      const pidioCsv = job.opciones && job.opciones.csv;
+      const csvBtn = document.getElementById('btnCsv');
+      if (pidioCsv && hayCandidatos) {
+        csvBtn.href = '{{ url_for("lote_csv", jid="JID") }}'.replace('JID', jid);
+        csvBtn.style.display = 'inline-block';
+      } else {
+        csvBtn.style.display = 'none';
+      }
+      actualizarMsgSel();
+    }
+  } catch(e) { /* reintentará en el siguiente ciclo */ }
+}
+</script>
+
+{% endblock %}

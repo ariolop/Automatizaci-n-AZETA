@@ -1,0 +1,32 @@
+{% extends "base.html" %}
+{% set seccion = "config" %}
+{% block contenido %}
+<div class="card">
+  <h3 style="margin-top:0">Configuración</h3>
+  <form method="post" action="/config">
+    <div class="row">
+      <div><label class="muted">Usuario B2B</label><input type="text" name="CS_USER" value="{{ cfg.get('CS_USER','') }}"></div>
+      <div><label class="muted">Contraseña</label><input type="password" name="CS_PASS" value="{{ cfg.get('CS_PASS','') }}"></div>
+    </div>
+    <div class="row" style="margin-top:12px">
+      <div><label class="muted">Timeout (s)</label><input type="number" name="CS_TIMEOUT" value="{{ cfg.get('CS_TIMEOUT','30') }}"></div>
+      <div><label class="muted">Perfil TLS (curl_cffi)</label>
+        <select name="CS_IMPERSONATE">
+          {% for op in ['chrome','chrome120','chrome116','chrome110','chrome99'] %}
+          <option value="{{op}}" {{ 'selected' if cfg.get('CS_IMPERSONATE')==op else '' }}>{{op}}</option>
+          {% endfor %}
+        </select></div>
+    </div>
+    <div class="row" style="margin-top:12px">
+      <div><label class="muted">IVA por defecto (%)</label><input type="number" name="CS_IVA_DEFAULT" value="{{ cfg.get('CS_IVA_DEFAULT','21') }}"></div>
+      <div><label class="muted">Aplicar recargo de equivalencia</label>
+        <select name="CS_APLICAR_RECARGO">
+          <option value="1" {{ 'selected' if cfg.get('CS_APLICAR_RECARGO','1')=='1' else '' }}>Sí</option>
+          <option value="0" {{ 'selected' if cfg.get('CS_APLICAR_RECARGO')=='0' else '' }}>No</option>
+        </select></div>
+    </div>
+    <p class="muted" style="margin-top:12px">El portal B2B no publica el % de IVA ni el PVP; el coste se calcula con el IVA por defecto de arriba.</p>
+    <div style="margin-top:8px"><button type="submit">Guardar</button></div>
+  </form>
+</div>
+{% endblock %}

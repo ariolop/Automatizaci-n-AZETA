@@ -1,0 +1,107 @@
+{% extends "base.html" %}
+{% block content %}
+
+<div class="card">
+  <h2>Buscar producto en AZETA</h2>
+  <form method="post" action="{{ url_for('buscar') }}">
+    <div class="row">
+      <div style="flex:1; min-width:240px;">
+        <input type="search" name="patron" placeholder="EAN, ISBN o texto…" autofocus
+               value="{{ datos.patron if datos else '' }}">
+      </div>
+      <button type="submit">Buscar</button>
+    </div>
+    <div class="row" style="margin-top:14px;">
+      <label class="chk">
+        <input type="checkbox" name="añadir_vigilado"> Añadir al monitor de disponibilidad
+      </label>
+      <label class="chk" title="{{ '' if ps_ok else 'Configura PRESTASHOP_URL y PRESTASHOP_TOKEN en .env' }}">
+        <input type="checkbox" name="subir_prestashop" {{ '' if ps_ok else 'disabled' }}>
+        Subir a PrestaShop (desactivado)
+        {% if not ps_ok %}<span class="muted">— PrestaShop sin configurar</span>{% endif %}
+      </label>
+    </div>
+  </form>
+</div>
+
+{% if datos and datos.encontrado %}
+{% if ya_ps %}
+<div class="flash warn">
+  ⚠ Este producto <b>ya existe en PrestaShop</b> (ID {{ ya_ps.id }} ·
+  {{ 'activo' if ya_ps.activo else 'inactivo' }}{% if ya_ps.nombre %} · «{{ ya_ps.nombre }}»{% endif %}).
+  Si lo subes de nuevo, el módulo lo rechazará para no duplicarlo.
+</div>
+{% endif %}
+<div class="card">
+  <div class="ficha">
+    <div>
+      {% if datos.imagenes %}
+        <img class="main" src="{{ datos.imagenes[0] }}" alt="" onclick="abrirLightbox(this.src)">
+      {% endif %}
+      {% if datos.imagenes %}
+      <div style="margin-top:10px;">
+        <a class="btn" href="{{ url_for('descargar', patron=datos.patron) }}">
+          ⬇ Descargar {{ 'imagen' if datos.imagenes|length == 1 else 'imágenes (.zip)' }}
+        </a>
+      </div>
+      {% endif %}
+    </div>
+
+    <div style="flex:1;">
+      <h2 style="margin-bottom:6px;">{{ datos.nombre }}</h2>
+      <p style="margin-top:0;">
+        {% if datos.disponible %}
+          <span class="pill ok-pill">DISPONIBLE</span>
+        {% elif datos.encontrado %}
+          <span class="pill bad-pill">{{ datos.situacion or 'NO DISPONIBLE' }}</span>
+        {% endif %}
+        {% if datos.dropshipping %}
+          <span class="pill ok-pill">Dropshipping ✓</span>
+        {% else %}
+          <span class="pill bad-pill">Sin dropshipping</span>
+        {% endif %}
+        {% if datos.es_expositor %}<span class="badge">Expositor · {{ datos.unidades_venta }} uds/envase</span>{% endif %}
+      </p>
+
+      <div class="costbox">
+        <div class="item">
+          <div class="lab">Precio unidad S/IVA</div>
+          <div class="val">{{ '%.2f'|format(datos.precio_unidad_sin_iva) ~ ' €' if datos.precio_unidad_sin_iva is not none else '—' }}</div>
+        </div>
+        <div class="item">
+          <div class="lab">Coste real / ud.{% if datos.recargo_pct %} (IVA {{ datos.iva_pct }}% + R.E. {{ datos.recargo_pct }}%){% endif %}</div>
+          <div class="val">{{ '%.2f'|format(datos.coste_real_unidad) ~ ' €' if datos.coste_real_unidad is not none else '—' }}</div>
+        </div>
+        <div class="item alt">
+          <div class="lab">PVP recomendado</div>
+          <div class="val">{{ '%.2f'|format(datos.pvp_recomendado) ~ ' €' if datos.pvp_recomendado else '—' }}</div>
+        </div>
+      </div>
+
+      <table>
+        <tr><th>EAN</th><td>{{ datos.ean or '—' }}</td></tr>
+        <tr><th>Fabricante</th><td>{{ datos.fabricante or '—' }}</td></tr>
+        {% if datos.es_expositor %}
+        <tr><th>Envase</th><td>{{ datos.unidades_venta }} uds · {{ '%.2f'|format(datos.precio_envase_sin_iva) ~ ' € S/IVA' if datos.precio_envase_sin_iva else '—' }}</td></tr>
+        {% endif %}
+        {% if datos.material %}<tr><th>Material</th><td>{{ datos.material }}</td></tr>{% endif %}
+        {% if datos.idioma %}<tr><th>Idioma</th><td>{{ datos.idioma }}</td></tr>{% endif %}
+        <tr><th>Situación</th><td>{{ datos.situacion or '—' }}</td></tr>
+        <tr><th>Devolución</th><td>{{ datos.disponibilidad or '—' }}</td></tr>
+      </table>
+
+      {% if datos.imagenes|length > 1 %}
+        <div class="thumbs">
+          {% for img in datos.imagenes %}<img src="{{ img }}" alt="" onclick="abrirLightbox(this.src)">{% endfor %}
+        </div>
+      {% endif %}
+    </div>
+  </div>
+  {% if datos.descripcion %}
+    <h2 style="margin-top:20px;">Descripción</h2>
+    <p>{{ datos.descripcion }}</p>
+  {% endif %}
+</div>
+{% endif %}
+
+{% endblock %}

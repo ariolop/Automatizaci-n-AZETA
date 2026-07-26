@@ -1,0 +1,33 @@
+# Blueprint de Render para el escáner AZETA + Liderpapel.
+# En Render: New > Blueprint > conecta este repo. Rellena los valores marcados
+# como "sync: false" (secretos) en el panel: son las credenciales y la contraseña.
+services:
+  - type: web
+    name: escaner-azeta-liderpapel
+    runtime: python
+    plan: free
+    rootDir: scanner            # la app vive en /scanner; los scrapers, en la raíz del repo
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn scanner_app:app --bind 0.0.0.0:$PORT --workers 1 --threads 4 --timeout 120
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.12.5"
+      # --- Credenciales AZETA (rellenar en el panel) ---
+      - key: AZETA_USER
+        sync: false
+      - key: AZETA_PASSWORD
+        sync: false
+      # --- Credenciales Liderpapel / CS Papelería (rellenar en el panel) ---
+      - key: CS_USER
+        sync: false
+      - key: CS_PASS
+        sync: false
+      - key: CS_IMPERSONATE
+        value: chrome
+      - key: CS_IVA_DEFAULT
+        value: "21"
+      # --- Acceso a la app (contraseña básica) ---
+      - key: APP_USER
+        value: admin
+      - key: APP_PASSWORD
+        sync: false

@@ -1,0 +1,54 @@
+{% extends "base.html" %}
+{% set seccion = "lote" %}
+{% block contenido %}
+<div class="card">
+  <h3 style="margin-top:0">Procesar muchos EANs</h3>
+  <form id="f">
+    <textarea name="texto" placeholder="Pega aquí los EANs (uno por línea o separados)"></textarea>
+    <div class="row" style="margin-top:12px">
+      <div><label class="muted">Archivo (CSV/TXT/XLSX)</label><input type="file" name="archivo"></div>
+      <div><label class="muted">Columna (A, B o número; vacío=todas)</label><input type="text" name="columna"></div>
+      <div><label class="muted">Fila inicial (saltar cabeceras)</label><input type="number" name="fila_inicial" value="1"></div>
+    </div>
+    <div style="margin-top:12px">
+      <label><input type="checkbox" name="vigilar"> Añadir los encontrados al Monitor</label>
+    </div>
+    <div style="margin-top:14px"><button type="submit">Iniciar</button>
+      <a id="csv" class="btn btn-sec" style="display:none">Descargar CSV</a></div>
+  </form>
+</div>
+
+<div class="card" id="panel" style="display:none">
+  <div id="barra" class="muted"></div>
+  <table style="margin-top:10px">
+    <thead><tr><th></th><th>EAN</th><th>Estado</th><th>Nombre</th><th>Neto</th><th>Coste</th><th>Stock</th></tr></thead>
+    <tbody id="filas"></tbody>
+  </table>
+</div>
+
+<script>
+const f=document.getElementById('f');
+f.addEventListener('submit', async e=>{
+  e.preventDefault();
+  const r=await fetch('/lote/iniciar',{method:'POST',body:new FormData(f)});
+  if(!r.ok){alert((await r.json()).error||'Error');return;}
+  const {job_id,total}=await r.json();
+  document.getElementById('panel').style.display='block';
+  document.getElementById('csv').style.display='none';
+  poll(job_id,total);
+});
+function badge(s){const m={disponible:'b-ok',agotado:'b-warn',desaparecido:'b-no'};return `<span class="badge ${m[s]||''}">${s}</span>`;}
+async function poll(jid,total){
+  const r=await fetch('/lote/estado/'+jid); const j=await r.json();
+  document.getElementById('barra').textContent=`Procesados ${j.procesados||0} de ${j.total||total}` + (j.estado==='error'?(' · ERROR: '+j.error):'');
+  const tb=document.getElementById('filas'); tb.innerHTML='';
+  (j.items||[]).forEach(it=>{
+    tb.insertAdjacentHTML('beforeend',`<tr><td>${it.imagen?`<img class="thumb" src="${it.imagen}">`:''}</td>
+      <td>${it.ean}</td><td>${badge(it.estado)}</td><td>${it.nombre||''}</td>
+      <td>${it.precio_neto??''}</td><td>${it.coste_real??''}</td><td>${it.stock??''}</td></tr>`);
+  });
+  if(j.estado==='en_curso'){setTimeout(()=>poll(jid,total),1500);}
+  else if(j.estado==='terminado'){const c=document.getElementById('csv');c.href='/lote/csv/'+jid;c.style.display='inline-block';}
+}
+</script>
+{% endblock %}

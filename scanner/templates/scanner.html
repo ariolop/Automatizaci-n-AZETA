@@ -1,0 +1,242 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<meta name="theme-color" content="#0f172a">
+<title>Escáner AZETA + Liderpapel</title>
+<style>
+  :root{
+    --bg:#0f172a; --panel:#1e293b; --panel2:#273449; --line:#334155;
+    --txt:#e2e8f0; --muted:#94a3b8; --azeta:#f59e0b; --lider:#38bdf8;
+    --ok:#22c55e; --bad:#ef4444; --warn:#fbbf24;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;
+    background:var(--bg);color:var(--txt);-webkit-text-size-adjust:100%}
+  header{padding:14px 16px;background:var(--panel);border-bottom:1px solid var(--line);
+    display:flex;align-items:center;gap:10px;position:sticky;top:0;z-index:5}
+  header h1{font-size:16px;margin:0;font-weight:600;flex:1}
+  .dot{width:9px;height:9px;border-radius:50%;background:var(--bad)}
+  .dot.on{background:var(--ok)}
+  main{padding:14px;max-width:820px;margin:0 auto}
+  #scanwrap{position:relative;border-radius:16px;overflow:hidden;background:#000;
+    aspect-ratio:4/3;border:1px solid var(--line)}
+  #video{width:100%;height:100%;object-fit:cover}
+  #reticle{position:absolute;inset:16% 12%;border:2px solid rgba(255,255,255,.85);
+    border-radius:14px;box-shadow:0 0 0 100vmax rgba(0,0,0,.35);pointer-events:none}
+  #reticle:after{content:"";position:absolute;left:0;right:0;top:50%;height:2px;
+    background:var(--azeta);box-shadow:0 0 8px var(--azeta);animation:scan 2s linear infinite}
+  @keyframes scan{0%{top:8%}50%{top:92%}100%{top:8%}}
+  .hint{color:var(--muted);font-size:13px;text-align:center;margin:10px 0}
+  .row{display:flex;gap:8px;margin:10px 0}
+  input[type=text]{flex:1;padding:12px;border-radius:10px;border:1px solid var(--line);
+    background:var(--panel);color:var(--txt);font-size:16px}
+  button{border:0;border-radius:10px;padding:12px 14px;font-size:15px;font-weight:600;
+    background:var(--azeta);color:#1a1200;cursor:pointer}
+  button.sec{background:var(--panel2);color:var(--txt);border:1px solid var(--line)}
+  button:disabled{opacity:.5}
+  #status{text-align:center;font-size:14px;color:var(--muted);min-height:20px;margin:6px 0}
+  #eanbig{text-align:center;font-size:22px;font-weight:700;letter-spacing:1px;margin:4px 0}
+  .banner{border-radius:12px;padding:12px 14px;margin:10px 0;font-weight:600;text-align:center}
+  .banner.cheap{background:rgba(34,197,94,.15);border:1px solid var(--ok);color:#bbf7d0}
+  .banner.none{background:rgba(239,68,68,.15);border:1px solid var(--bad);color:#fecaca}
+  .cards{display:grid;grid-template-columns:1fr;gap:12px}
+  @media(min-width:620px){.cards{grid-template-columns:1fr 1fr}}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:14px;overflow:hidden}
+  .card .top{padding:10px 12px;font-weight:700;display:flex;align-items:center;gap:8px}
+  .card.azeta .top{border-top:3px solid var(--azeta)}
+  .card.lider .top{border-top:3px solid var(--lider)}
+  .tag{font-size:11px;padding:2px 8px;border-radius:99px;font-weight:700}
+  .tag.ok{background:rgba(34,197,94,.2);color:#bbf7d0}
+  .tag.bad{background:rgba(239,68,68,.2);color:#fecaca}
+  .tag.win{background:var(--ok);color:#06210f}
+  .card .body{padding:0 12px 12px}
+  .prod{font-size:15px;font-weight:600;margin:4px 0}
+  .imgrow{display:flex;gap:6px;overflow-x:auto;padding:6px 0}
+  .imgrow img{height:78px;border-radius:8px;background:#fff}
+  .kv{display:flex;justify-content:space-between;gap:10px;font-size:13px;
+    padding:5px 0;border-top:1px solid var(--line)}
+  .kv .k{color:var(--muted)}
+  .kv .v{text-align:right;font-weight:600}
+  .price{font-size:20px;font-weight:800}
+  .price .u{font-size:12px;color:var(--muted);font-weight:600}
+  .err{color:#fecaca;font-size:13px;padding:8px 0}
+  .desc{font-size:12px;color:var(--muted);margin-top:8px;max-height:64px;overflow:auto}
+  .spin{display:inline-block;width:16px;height:16px;border:2px solid var(--muted);
+    border-top-color:transparent;border-radius:50%;animation:sp .8s linear infinite;vertical-align:-3px}
+  @keyframes sp{to{transform:rotate(360deg)}}
+  .foot{color:var(--muted);font-size:11px;text-align:center;margin:18px 0 30px}
+</style>
+</head>
+<body>
+<header>
+  <span id="dot" class="dot"></span>
+  <h1>Escáner AZETA + Liderpapel</h1>
+  <button id="btnCam" class="sec" style="padding:8px 12px;font-size:13px">Cámara</button>
+</header>
+
+<main>
+  <div id="scanwrap">
+    <video id="video" playsinline muted></video>
+    <div id="reticle"></div>
+  </div>
+  <div class="hint">Apunta al código de barras. También puedes escribir el EAN a mano.</div>
+
+  <div class="row">
+    <input id="ean" type="text" inputmode="numeric" placeholder="EAN (p. ej. 8411574036708)">
+    <button id="btnBuscar">Buscar</button>
+  </div>
+
+  <div id="status"></div>
+  <div id="resultado"></div>
+
+  <div class="foot">Coste real = precio neto × (1 + IVA% + recargo de equivalencia). Liderpapel no publica IVA: se estima al 21%.</div>
+</main>
+
+<script src="https://unpkg.com/@zxing/library@0.21.3/umd/index.min.js"></script>
+<script>
+const $ = s => document.querySelector(s);
+const statusEl = $("#status"), resEl = $("#resultado"), dot = $("#dot");
+let reader = null, scanning = false, lastCode = null, lastAt = 0, busy = false;
+
+function fmt(n){ return (n===null||n===undefined||n==="") ? "—" : Number(n).toLocaleString("es-ES",{minimumFractionDigits:2,maximumFractionDigits:2}); }
+function esc(s){ return (s??"").toString().replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c])); }
+
+async function pickBackDeviceId(){
+  // Enumera cámaras (si la API lo permite) y elige la trasera. Devuelve deviceId o undefined.
+  try{
+    let listFn = null;
+    if(reader && typeof reader.listVideoInputDevices === "function")
+      listFn = reader.listVideoInputDevices.bind(reader);
+    else if(ZXing.BrowserCodeReader && typeof ZXing.BrowserCodeReader.listVideoInputDevices === "function")
+      listFn = ZXing.BrowserCodeReader.listVideoInputDevices;
+    if(!listFn) return undefined;
+    const devices = await listFn();
+    if(!devices || !devices.length) return undefined;
+    const back = devices.find(d => /back|tras|trás|rear|environment/i.test(d.label||""));
+    return (back || devices[devices.length-1]).deviceId;
+  }catch(e){ return undefined; }
+}
+
+async function startCam(){
+  try{
+    const hints = new Map();
+    const F = ZXing.BarcodeFormat;
+    hints.set(ZXing.DecodeHintType.POSSIBLE_FORMATS,
+      [F.EAN_13, F.EAN_8, F.UPC_A, F.UPC_E, F.CODE_128, F.CODE_39]);
+    reader = new ZXing.BrowserMultiFormatReader(hints, 400);
+    const cb = (result, err) => { if(result){ onCode(result.getText()); } };
+
+    // 1) Preferimos pedir la cámara trasera por facingMode (lo más fiable en móvil).
+    if(typeof reader.decodeFromConstraints === "function"){
+      const constraints = { audio:false, video:{ facingMode:{ ideal:"environment" } } };
+      await reader.decodeFromConstraints(constraints, "video", cb);
+    } else {
+      // 2) Fallback: enumerar dispositivos y elegir la trasera.
+      const devId = await pickBackDeviceId();
+      await reader.decodeFromVideoDevice(devId, "video", cb);
+    }
+    scanning = true; dot.classList.add("on");
+    statusEl.textContent = "Cámara activa — buscando código…";
+  }catch(e){
+    dot.classList.remove("on");
+    statusEl.innerHTML = "No se pudo abrir la cámara ("+esc(e.message||e)+
+      "). Escribe el EAN a mano.<br>Recuerda: la cámara necesita HTTPS y dar permiso.";
+  }
+}
+function stopCam(){ if(reader){ try{reader.reset();}catch(e){} } scanning=false; dot.classList.remove("on"); }
+
+function onCode(code){
+  const now = Date.now();
+  if(code === lastCode && now - lastAt < 3000) return;   // anti-repetición
+  lastCode = code; lastAt = now;
+  if(navigator.vibrate) navigator.vibrate(80);
+  $("#ean").value = code;
+  buscar(code);
+}
+
+async function buscar(ean){
+  ean = (ean || $("#ean").value || "").trim();
+  if(!/^\d{6,14}$/.test(ean)){ statusEl.textContent = "Introduce un EAN válido (6–14 dígitos)."; return; }
+  if(busy) return; busy = true;
+  statusEl.innerHTML = '<span class="spin"></span> Consultando AZETA y Liderpapel…';
+  resEl.innerHTML = "";
+  try{
+    const r = await fetch("/api/buscar?ean=" + encodeURIComponent(ean));
+    const data = await r.json();
+    render(data);
+  }catch(e){
+    statusEl.textContent = "Error de red: " + (e.message||e);
+  }finally{ busy = false; }
+}
+
+function tarjeta(d, cls, ganador){
+  if(d.error && !d.encontrado){
+    return `<div class="card ${cls}"><div class="top">${d.proveedor}
+      <span class="tag bad">error</span></div>
+      <div class="body"><div class="err">${esc(d.error)}</div></div></div>`;
+  }
+  if(!d.encontrado){
+    return `<div class="card ${cls}"><div class="top">${d.proveedor}
+      <span class="tag bad">no encontrado</span></div>
+      <div class="body"><div class="err">Este EAN no aparece en ${d.proveedor}.</div></div></div>`;
+  }
+  const disp = d.disponible ? '<span class="tag ok">disponible</span>'
+                            : '<span class="tag bad">no disponible</span>';
+  const win = ganador ? '<span class="tag win">más barato</span>' : '';
+  const imgs = (d.imagenes||[]).slice(0,4)
+    .map(u=>`<img src="${esc(u)}" loading="lazy" onerror="this.style.display='none'">`).join("");
+  let kv = "";
+  const add=(k,v)=>{ if(v!==null&&v!==undefined&&v!=="") kv+=`<div class="kv"><span class="k">${esc(k)}</span><span class="v">${esc(v)}</span></div>`; };
+  add("EAN", d.ean);
+  add("Marca", d.marca);
+  if(d.situacion) add("Situación", d.situacion);
+  if(d.stock!==null&&d.stock!==undefined) add("Stock", d.stock);
+  for(const [k,v] of Object.entries(d.extra||{})) add(k, v);
+  if(d.pvp) add("PVP recomendado", fmt(d.pvp)+" €");
+  return `<div class="card ${cls}">
+    <div class="top">${d.proveedor} ${disp} ${win}</div>
+    <div class="body">
+      <div class="prod">${esc(d.nombre||"(sin nombre)")}</div>
+      ${imgs?`<div class="imgrow">${imgs}</div>`:""}
+      <div class="kv"><span class="k">Precio neto</span>
+        <span class="v price">${fmt(d.precio_neto)} <span class="u">€/ud</span></span></div>
+      <div class="kv"><span class="k">Coste real (IVA+recargo)</span>
+        <span class="v price">${fmt(d.coste_real)} <span class="u">€/ud</span></span></div>
+      ${kv}
+      ${d.descripcion?`<div class="desc">${esc(d.descripcion)}</div>`:""}
+    </div></div>`;
+}
+
+function render(data){
+  if(!data.ok){ statusEl.textContent = data.error || "Error."; return; }
+  const {azeta, cs, comparacion, ean, encontrado} = data;
+  statusEl.innerHTML = `<div id="eanbig">EAN ${esc(ean)}</div>`;
+
+  let banner = "";
+  if(!encontrado){
+    banner = `<div class="banner none">No encontrado en AZETA ni en Liderpapel.<br>EAN buscado: <b>${esc(ean)}</b></div>`;
+  }else if(comparacion.mas_barato && comparacion.mas_barato!=="empate"){
+    const dif = comparacion.diferencia!==null ? ` (ahorro ${fmt(comparacion.diferencia)} €/ud)` : "";
+    banner = `<div class="banner cheap">Más barato: <b>${esc(comparacion.mas_barato)}</b>${dif}</div>`;
+  }else if(comparacion.mas_barato==="empate"){
+    banner = `<div class="banner cheap">Mismo coste en ambos.</div>`;
+  }
+  const winA = comparacion.mas_barato==="AZETA";
+  const winC = comparacion.mas_barato==="Liderpapel";
+  resEl.innerHTML = banner +
+    `<div class="cards">${tarjeta(azeta,"azeta",winA)}${tarjeta(cs,"lider",winC)}</div>
+     <div class="row"><button class="sec" style="flex:1" onclick="resEl.innerHTML='';statusEl.textContent=lastCode?'Listo para el siguiente.':'';lastCode=null;">Escanear otro</button></div>`;
+}
+
+$("#btnBuscar").onclick = ()=>buscar();
+$("#ean").addEventListener("keydown", e=>{ if(e.key==="Enter") buscar(); });
+$("#btnCam").onclick = ()=>{ if(scanning){ stopCam(); statusEl.textContent="Cámara apagada."; $("#btnCam").textContent="Cámara"; }
+  else { startCam(); $("#btnCam").textContent="Apagar"; } };
+
+window.addEventListener("load", startCam);
+window.addEventListener("beforeunload", stopCam);
+</script>
+</body>
+</html>

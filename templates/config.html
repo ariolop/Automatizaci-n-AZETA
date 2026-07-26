@@ -1,0 +1,90 @@
+{% extends "base.html" %}
+{% block content %}
+
+<div class="card">
+  <h2>Configuración</h2>
+  <p class="muted">Los cambios se guardan en el archivo <code>.env</code> y se aplican al instante (sin reiniciar).</p>
+
+  <form method="post" action="{{ url_for('configuracion') }}">
+
+    <h2 style="font-size:15px; margin-top:18px;">Credenciales AZETA</h2>
+    <div class="row" style="gap:16px;">
+      <div style="flex:1; min-width:200px;">
+        <label class="muted">Usuario</label>
+        <input type="text" name="AZETA_USER" value="{{ cfg.AZETA_USER }}">
+      </div>
+      <div style="flex:1; min-width:200px;">
+        <label class="muted">Contraseña</label>
+        <input type="text" name="AZETA_PASSWORD" value="{{ cfg.AZETA_PASSWORD }}">
+      </div>
+    </div>
+
+    <h2 style="font-size:15px; margin-top:22px;">PrestaShop</h2>
+    <div class="row" style="gap:16px;">
+      <div style="flex:2; min-width:240px;">
+        <label class="muted">URL de la tienda (sin barra final)</label>
+        <input type="text" name="PRESTASHOP_URL" value="{{ cfg.PRESTASHOP_URL }}" placeholder="http://192.168.18.7">
+      </div>
+      <div style="flex:1; min-width:120px;">
+        <label class="muted">Categoría por defecto (id)</label>
+        <input type="text" name="PRESTASHOP_CATEGORIA_DEFECTO" value="{{ cfg.PRESTASHOP_CATEGORIA_DEFECTO }}">
+      </div>
+    </div>
+    <div style="margin-top:12px;">
+      <label class="muted">Token del módulo</label>
+      <input type="text" name="PRESTASHOP_TOKEN" value="{{ cfg.PRESTASHOP_TOKEN }}">
+    </div>
+    <p style="margin-top:8px;">
+      {% if ps_ok %}
+        <span class="pill ok-pill">PrestaShop configurado</span>
+      {% else %}
+        <span class="pill unk-pill">PrestaShop sin configurar</span>
+      {% endif %}
+      {% if aviso_ps %}<span class="muted">· No se pudieron cargar proveedores/impuestos: {{ aviso_ps }}</span>{% endif %}
+    </p>
+
+    {% if ps_ok %}
+    <div class="row" style="gap:16px; margin-top:8px;">
+      <div style="flex:1; min-width:220px;">
+        <label class="muted">Proveedor para los productos</label>
+        <select name="PRESTASHOP_PROVEEDOR" style="width:100%; padding:10px 12px; border:1px solid var(--bd); border-radius:8px; font-size:15px;">
+          <option value="">— Sin proveedor —</option>
+          {% for p in proveedores %}
+            <option value="{{ p.id }}" {{ 'selected' if cfg.PRESTASHOP_PROVEEDOR == (p.id|string) else '' }}>{{ p.nombre }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div style="flex:1; min-width:220px;">
+        <label class="muted">Regla de impuestos</label>
+        <select name="PRESTASHOP_IMPUESTOS" style="width:100%; padding:10px 12px; border:1px solid var(--bd); border-radius:8px; font-size:15px;">
+          <option value="">— Sin impuestos —</option>
+          {% for t in impuestos %}
+            <option value="{{ t.id }}" {{ 'selected' if cfg.PRESTASHOP_IMPUESTOS == (t.id|string) else '' }}>{{ t.nombre }}</option>
+          {% endfor %}
+        </select>
+      </div>
+    </div>
+    {% endif %}
+
+    <h2 style="font-size:15px; margin-top:22px;">Precios</h2>
+    <label class="chk">
+      <input type="checkbox" name="APLICAR_RECARGO" {{ 'checked' if cfg.APLICAR_RECARGO not in ['0','','false','no'] else '' }}>
+      Aplicar recargo de equivalencia al calcular el coste real
+    </label>
+
+    <div style="margin-top:20px;">
+      <button type="submit">Guardar configuración</button>
+    </div>
+  </form>
+</div>
+
+{% if ps_ok %}
+<div class="card">
+  <h2>Probar conexión con PrestaShop</h2>
+  <form method="post" action="{{ url_for('config_probar_ps') }}">
+    <button type="submit" class="sec">Probar conexión (listar productos)</button>
+  </form>
+</div>
+{% endif %}
+
+{% endblock %}
