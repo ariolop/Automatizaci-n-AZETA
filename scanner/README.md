@@ -72,12 +72,64 @@ Puerto configurable con la variable `SCANNER_PORT`.
 
 ---
 
+---
+
+## Historial de escaneos con Supabase (opcional)
+
+Si lo configuras, cada escaneo se guarda en una tabla de **Supabase** (base de
+datos gratuita en la nube) y puedes consultarlo en la página **Historial** (enlace
+en la cabecera). Guarda: fecha, EAN, si se encontró en cada proveedor, el nombre,
+el **precio neto**, el **coste real** y el **PVP** de cada uno, cuál salió más
+barato, y un snapshot completo del resultado.
+
+**Caché al reescanear:** ese snapshot hace que, al volver a escanear el mismo EAN,
+la info aparezca **al instante** (sin consultar de nuevo a AZETA y Liderpapel). Se
+muestra un aviso con la fecha del dato guardado y un botón **"Buscar de nuevo"**
+para forzar una consulta fresca cuando quieras. También puedes forzar añadiendo
+`&forzar=1` a la URL de `/api/buscar`.
+
+Es **opcional**: si no defines las variables, la app funciona igual pero no guarda
+nada (y sin caché). El registro se hace en segundo plano y nunca ralentiza ni rompe
+la búsqueda.
+
+> Si ya habías creado la tabla en una versión anterior, ejecuta el bloque
+> **MIGRACIÓN** que hay dentro de `supabase_schema.sql` para añadir las columnas
+> nuevas (`azeta_precio_neto`, `azeta_pvp`, `cs_precio_neto`, `payload`).
+
+**Solo tienes que hacer 2 cosas:**
+
+1. **Crear la tabla.** En Supabase (proyecto gratis en https://supabase.com):
+   *SQL Editor* → pega el contenido de **`supabase_schema.sql`** → *Run*.
+
+2. **Poner la key.** Copia `scanner/.env.example` a `scanner/.env` y rellena:
+
+   ```
+   SUPABASE_URL=https://xxxxxxxxxxxx.supabase.co
+   SUPABASE_KEY=<la key service_role>
+   ```
+
+   - `SUPABASE_URL` y la key están en Supabase → *Project Settings → API* (o *Data API*).
+   - Usa la key **`service_role`** (es de servidor y salta las políticas RLS, así no
+     tienes que configurar nada más). Es **secreta**: no la subas a GitHub ni la uses
+     en el navegador. El `.gitignore` ya excluye el `.env`.
+
+   > En **Render**, en vez del `.env`, define `SUPABASE_URL` y `SUPABASE_KEY` como
+   > variables de entorno en el panel (ya están en el `render.yaml`).
+
+Y ya está. A partir de ahí, cada búsqueda queda registrada y la ves en `/historial`.
+
+---
+
 ## Archivos
 
 | Archivo | Función |
 |---|---|
-| `scanner_app.py` | Backend Flask: `/` (página) y `/api/buscar?ean=` (consulta ambos) |
+| `scanner_app.py` | Backend Flask: `/`, `/api/buscar?ean=`, `/historial`, `/api/historial` |
 | `templates/scanner.html` | Interfaz móvil + escáner de cámara (ZXing) |
+| `templates/historial.html` | Página de historial (lee de Supabase) |
+| `historial.py` | Registro/lectura de escaneos en Supabase (opcional) |
+| `supabase_schema.sql` | SQL para crear la tabla en Supabase |
+| `.env.example` | Plantilla de configuración del escáner (Supabase, contraseña) |
 | `gen_cert.py` | Genera el certificado HTTPS autofirmado (solo local) |
 | `run_scanner.bat` | Arranque en Windows (instala, genera cert, muestra IP) |
 | `Procfile` | Arranque con gunicorn (para Render) |

@@ -49,6 +49,7 @@ def _cargar_env(ruta: Path) -> None:
         os.environ.setdefault(clave.strip(), valor.strip())
 
 
+_cargar_env(BASE / ".env")       # config del escáner: SUPABASE_*, APP_USER/APP_PASSWORD
 _cargar_env(ROOT / ".env")       # AZETA_USER / AZETA_PASSWORD / ...
 _cargar_env(CS_DIR / ".env")     # CS_USER / CS_PASS / CS_IMPERSONATE / ...
 
@@ -63,6 +64,8 @@ import azeta_producto                                   # noqa: E402
 import cs_producto                                      # noqa: E402
 from azeta_login import AzetaSession, AzetaError        # noqa: E402
 from cs_login import CSSession, CSError                 # noqa: E402
+
+import historial                                        # noqa: E402  registro en Supabase (opcional)
 
 # --------------------------------------------------------------------------- #
 # Sesiones persistentes (login una vez; se re-loguea si caduca/falla)
@@ -225,21 +228,61 @@ def api_buscar():
     if not ean:
         return jsonify({"ok": False, "error": "Falta el parámetro 'ean'."}), 400
 
-    # Los dos proveedores en paralelo.
+    forzar = (request.args.get("forzar") or "").lower() in ("1", "true", "si", "sí", "yes")
+
+    # CACHÉ: si no se fuerza, intenta servir el último escaneo guardado de ese EAN.
+    if not forzar:
+        cache = historial.buscar_cache(ean)
+        if cache:
+            p = cache["payload"]
+            return jsonify({
+                "ok": True,
+                "ean": ean,
+                "encontrado": p.get("encontrado", True),
+                "azeta": p.get("azeta"),
+                "cs": p.get("cs"),
+                "comparacion": p.get("comparacion"),
+                "cache": True,
+                "cache_fecha": cache.get("creado_at"),
+            })
+
+    # Búsqueda en vivo: los dos proveedores en paralelo.
     fa = _pool.submit(_buscar_azeta, ean)
     fc = _pool.submit(_buscar_cs, ean)
     azeta = _norm_azeta(fa.result())
     cs = _norm_cs(fc.result())
 
     encontrado = azeta["encontrado"] or cs["encontrado"]
+    comparacion = _comparar(azeta, cs)
+
+    # Registro en Supabase (best-effort, en segundo plano; no bloquea la respuesta
+    # ni falla la búsqueda si Supabase no está configurado o da error).
+    historial.registrar_async(ean, azeta, cs, comparacion)
+
     return jsonify({
         "ok": True,
         "ean": ean,
         "encontrado": encontrado,
         "azeta": azeta,
         "cs": cs,
-        "comparacion": _comparar(azeta, cs),
+        "comparacion": comparacion,
+        "cache": False,
     })
+
+
+@app.route("/historial")
+def pagina_historial():
+    return render_template("historial.html", activo=historial.activo())
+
+
+@app.route("/api/historial")
+def api_historial():
+    try:
+        limite = min(int(request.args.get("limite", 100)), 500)
+    except ValueError:
+        limite = 100
+    return jsonify({"ok": True, "activo": historial.activo(),
+                    "escaneos": historial.ultimos(limite)})
 
 
 @app.route("/salud")

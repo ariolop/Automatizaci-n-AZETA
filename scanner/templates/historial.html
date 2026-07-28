@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#0f172a">
+<title>Historial de escaneos</title>
+<style>
+  :root{--bg:#0f172a;--panel:#1e293b;--line:#334155;--txt:#e2e8f0;--muted:#94a3b8;
+    --azeta:#f59e0b;--lider:#38bdf8;--ok:#22c55e;--bad:#ef4444}
+  *{box-sizing:border-box}
+  body{margin:0;font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;
+    background:var(--bg);color:var(--txt)}
+  header{padding:14px 16px;background:var(--panel);border-bottom:1px solid var(--line);
+    display:flex;align-items:center;gap:10px;position:sticky;top:0}
+  header h1{font-size:16px;margin:0;font-weight:600;flex:1}
+  a.btn{color:var(--txt);text-decoration:none;background:#273449;border:1px solid var(--line);
+    padding:8px 12px;border-radius:10px;font-size:13px}
+  main{padding:12px;max-width:900px;margin:0 auto}
+  #status{color:var(--muted);font-size:14px;margin:8px 0}
+  table{width:100%;border-collapse:collapse;font-size:13px}
+  th,td{padding:8px 6px;border-bottom:1px solid var(--line);text-align:left;vertical-align:top}
+  th{color:var(--muted);font-weight:600;position:sticky;top:56px;background:var(--bg)}
+  td.num{text-align:right;white-space:nowrap}
+  .ean{font-weight:700;white-space:nowrap}
+  .tag{font-size:11px;padding:1px 7px;border-radius:99px;font-weight:700}
+  .ok{background:rgba(34,197,94,.2);color:#bbf7d0}
+  .no{background:rgba(239,68,68,.2);color:#fecaca}
+  .win{color:#06210f;background:var(--ok);padding:1px 7px;border-radius:99px;font-weight:700}
+  .a{color:var(--azeta)}.l{color:var(--lider)}
+  .muted{color:var(--muted)}
+</style>
+</head>
+<body>
+<header>
+  <h1>Historial de escaneos</h1>
+  <a class="btn" href="/">← Escáner</a>
+  <a class="btn" href="#" onclick="cargar();return false">Actualizar</a>
+</header>
+<main>
+  <div id="status">Cargando…</div>
+  <div id="tabla"></div>
+</main>
+<script>
+const esc=s=>(s??"").toString().replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const fmt=n=>(n===null||n===undefined||n==="")?"—":Number(n).toLocaleString("es-ES",{minimumFractionDigits:2,maximumFractionDigits:2});
+function fecha(s){ if(!s) return "—"; const d=new Date(s); return d.toLocaleString("es-ES"); }
+
+async function cargar(){
+  const st=document.getElementById("status"), cont=document.getElementById("tabla");
+  st.textContent="Cargando…"; cont.innerHTML="";
+  try{
+    const r=await fetch("/api/historial?limite=200"); const d=await r.json();
+    if(!d.activo){ st.innerHTML="El historial de Supabase no está configurado. Define <b>SUPABASE_URL</b> y <b>SUPABASE_KEY</b> en el .env."; return; }
+    const filas=d.escaneos||[];
+    if(!filas.length){ st.textContent="Aún no hay escaneos registrados."; return; }
+    st.textContent=filas.length+" escaneos (más recientes primero)";
+    let h=`<table><thead><tr>
+      <th>Fecha</th><th>EAN</th><th></th>
+      <th class="a">AZETA</th><th class="num a">Coste</th>
+      <th class="l">Liderpapel</th><th class="num l">Coste</th>
+      <th>Más barato</th></tr></thead><tbody>`;
+    for(const f of filas){
+      const enc=f.encontrado?'<span class="tag ok">✓</span>':'<span class="tag no">✗</span>';
+      const mb=f.mas_barato&&f.mas_barato!=="empate"?`<span class="win">${esc(f.mas_barato)}</span>`
+             :(f.mas_barato==="empate"?'<span class="muted">empate</span>':'—');
+      h+=`<tr>
+        <td class="muted">${esc(fecha(f.creado_at))}</td>
+        <td class="ean">${esc(f.ean)}</td>
+        <td>${enc}</td>
+        <td>${f.azeta_encontrado?esc(f.azeta_nombre||"(sin nombre)"):'<span class="muted">no</span>'}</td>
+        <td class="num">${f.azeta_encontrado?fmt(f.azeta_coste)+" €":"—"}</td>
+        <td>${f.cs_encontrado?esc(f.cs_nombre||"(sin nombre)"):'<span class="muted">no</span>'}</td>
+        <td class="num">${f.cs_encontrado?fmt(f.cs_coste)+" €":"—"}</td>
+        <td>${mb}</td></tr>`;
+    }
+    h+="</tbody></table>";
+    cont.innerHTML=h;
+  }catch(e){ st.textContent="Error cargando el historial: "+(e.message||e); }
+}
+cargar();
+</script>
+</body>
+</html>

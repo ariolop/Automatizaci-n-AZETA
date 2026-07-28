@@ -31,3 +31,10 @@ services:
         value: admin
       - key: APP_PASSWORD
         sync: false
+      # --- Historial en Supabase (opcional) ---
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_KEY          # usa la key 'service_role' (secreta)
+        sync: false
+      - key: SUPABASE_TABLE
+        value: escaneos

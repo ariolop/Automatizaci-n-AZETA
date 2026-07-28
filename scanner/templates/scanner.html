@@ -38,6 +38,10 @@
   button:disabled{opacity:.5}
   #status{text-align:center;font-size:14px;color:var(--muted);min-height:20px;margin:6px 0}
   #eanbig{text-align:center;font-size:22px;font-weight:700;letter-spacing:1px;margin:4px 0}
+  .cachebar{display:flex;align-items:center;justify-content:center;gap:10px;flex-wrap:wrap;
+    font-size:12px;color:var(--muted);background:var(--panel2);border:1px solid var(--line);
+    border-radius:10px;padding:8px 10px;margin:8px 0}
+  .mini{padding:5px 10px;font-size:12px;background:var(--azeta);color:#1a1200;border-radius:8px}
   .banner{border-radius:12px;padding:12px 14px;margin:10px 0;font-weight:600;text-align:center}
   .banner.cheap{background:rgba(34,197,94,.15);border:1px solid var(--ok);color:#bbf7d0}
   .banner.none{background:rgba(239,68,68,.15);border:1px solid var(--bad);color:#fecaca}
@@ -73,6 +77,7 @@
 <header>
   <span id="dot" class="dot"></span>
   <h1>Escáner AZETA + Liderpapel</h1>
+  <a href="/historial" class="sec" style="text-decoration:none;padding:8px 12px;font-size:13px;border-radius:10px;border:1px solid var(--line);background:var(--panel2);color:var(--txt)">Historial</a>
   <button id="btnCam" class="sec" style="padding:8px 12px;font-size:13px">Cámara</button>
 </header>
 
@@ -156,14 +161,17 @@ function onCode(code){
   buscar(code);
 }
 
-async function buscar(ean){
+async function buscar(ean, forzar){
   ean = (ean || $("#ean").value || "").trim();
   if(!/^\d{6,14}$/.test(ean)){ statusEl.textContent = "Introduce un EAN válido (6–14 dígitos)."; return; }
   if(busy) return; busy = true;
-  statusEl.innerHTML = '<span class="spin"></span> Consultando AZETA y Liderpapel…';
+  statusEl.innerHTML = forzar ? '<span class="spin"></span> Buscando de nuevo en AZETA y Liderpapel…'
+                              : '<span class="spin"></span> Consultando…';
   resEl.innerHTML = "";
   try{
-    const r = await fetch("/api/buscar?ean=" + encodeURIComponent(ean));
+    let url = "/api/buscar?ean=" + encodeURIComponent(ean);
+    if(forzar) url += "&forzar=1";
+    const r = await fetch(url);
     const data = await r.json();
     render(data);
   }catch(e){
@@ -209,10 +217,19 @@ function tarjeta(d, cls, ganador){
     </div></div>`;
 }
 
+function fechaCorta(s){ if(!s) return ""; try{ return new Date(s).toLocaleString("es-ES"); }catch(e){ return ""; } }
+
 function render(data){
   if(!data.ok){ statusEl.textContent = data.error || "Error."; return; }
   const {azeta, cs, comparacion, ean, encontrado} = data;
   statusEl.innerHTML = `<div id="eanbig">EAN ${esc(ean)}</div>`;
+
+  // Aviso de caché: si el dato viene guardado, se indica con su fecha.
+  let cacheNote = "";
+  if(data.cache){
+    cacheNote = `<div class="cachebar">⚡ Dato guardado ${esc(fechaCorta(data.cache_fecha))}
+      <button class="mini" onclick="buscar('${esc(ean)}',true)">Buscar de nuevo</button></div>`;
+  }
 
   let banner = "";
   if(!encontrado){
@@ -225,9 +242,12 @@ function render(data){
   }
   const winA = comparacion.mas_barato==="AZETA";
   const winC = comparacion.mas_barato==="Liderpapel";
-  resEl.innerHTML = banner +
+  resEl.innerHTML = cacheNote + banner +
     `<div class="cards">${tarjeta(azeta,"azeta",winA)}${tarjeta(cs,"lider",winC)}</div>
-     <div class="row"><button class="sec" style="flex:1" onclick="resEl.innerHTML='';statusEl.textContent=lastCode?'Listo para el siguiente.':'';lastCode=null;">Escanear otro</button></div>`;
+     <div class="row">
+       <button class="sec" style="flex:1" onclick="buscar('${esc(ean)}',true)">Buscar de nuevo</button>
+       <button class="sec" style="flex:1" onclick="resEl.innerHTML='';statusEl.textContent=lastCode?'Listo para el siguiente.':'';lastCode=null;">Escanear otro</button>
+     </div>`;
 }
 
 $("#btnBuscar").onclick = ()=>buscar();
