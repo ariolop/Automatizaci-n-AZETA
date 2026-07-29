@@ -1,10 +1,13 @@
 <?php
 /**
- * azetaconnector — Módulo PrestaShop 9 para recibir productos del scraper de AZETA.
+ * aplproveedoresconector — Módulo PrestaShop 9 para recibir productos del scraper de AZETA.
  *
- * Expone dos front controllers (autenticados por token):
- *   - controller=crear    : crea un producto DESACTIVADO a partir del JSON recibido.
- *   - controller=listado  : devuelve los productos (id, ean13, nombre, activo).
+ * Front controllers (autenticados por token):
+ *   - controller=crear      : crea un producto DESACTIVADO a partir del JSON recibido.
+ *   - controller=listado    : devuelve los productos (id, ean13, nombre, activo).
+ *   - controller=comprobar  : comprueba qué EANs ya existen.
+ *   - controller=opciones   : proveedores e impuestos disponibles.
+ *   - controller=actualizar : actualiza EAN13/nombre de un producto (sincronización).
  *
  * Compatibilidad: PrestaShop 8.0 – 9.x (PHP 8.1+).
  */
@@ -13,11 +16,11 @@ if (!defined('_PS_VERSION_')) {
     exit;
 }
 
-class AzetaConnector extends Module
+class Aplproveedoresconector extends Module
 {
     public function __construct()
     {
-        $this->name = 'azetaconnector';
+        $this->name = 'aplproveedoresconector';
         $this->tab = 'administration';
         $this->version = '1.0.0';
         $this->author = 'Clearis';
@@ -27,9 +30,9 @@ class AzetaConnector extends Module
 
         parent::__construct();
 
-        $this->displayName = $this->l('AZETA Connector');
-        $this->description = $this->l('Recibe productos del scraper de AZETA y los crea desactivados.');
-        $this->confirmUninstall = $this->l('¿Seguro que quieres desinstalar AZETA Connector?');
+        $this->displayName = $this->l('APL Proveedores Connector');
+        $this->description = $this->l('Crea, comprueba y actualiza productos desde la app de proveedores (AZETA, Liderpapel).');
+        $this->confirmUninstall = $this->l('¿Seguro que quieres desinstalar APL Proveedores Connector?');
     }
 
     public function install()
@@ -38,13 +41,13 @@ class AzetaConnector extends Module
             Shop::setContext(Shop::CONTEXT_ALL);
         }
         // Genera un token aleatorio inicial
-        Configuration::updateValue('AZETACONNECTOR_TOKEN', Tools::passwdGen(40));
+        Configuration::updateValue('APLPROVEEDORESCONECTOR_TOKEN', Tools::passwdGen(40));
         return parent::install();
     }
 
     public function uninstall()
     {
-        Configuration::deleteByName('AZETACONNECTOR_TOKEN');
+        Configuration::deleteByName('APLPROVEEDORESCONECTOR_TOKEN');
         return parent::uninstall();
     }
 
@@ -55,26 +58,26 @@ class AzetaConnector extends Module
     {
         $output = '';
 
-        if (Tools::isSubmit('submitAzetaToken')) {
-            $token = trim(Tools::getValue('AZETACONNECTOR_TOKEN'));
+        if (Tools::isSubmit('submitToken')) {
+            $token = trim(Tools::getValue('APLPROVEEDORESCONECTOR_TOKEN'));
             if ($token === '') {
                 $token = Tools::passwdGen(40);
             }
-            Configuration::updateValue('AZETACONNECTOR_TOKEN', $token);
+            Configuration::updateValue('APLPROVEEDORESCONECTOR_TOKEN', $token);
             $output .= $this->displayConfirmation($this->l('Token guardado.'));
         }
 
         if (Tools::isSubmit('regenerarToken')) {
-            Configuration::updateValue('AZETACONNECTOR_TOKEN', Tools::passwdGen(40));
+            Configuration::updateValue('APLPROVEEDORESCONECTOR_TOKEN', Tools::passwdGen(40));
             $output .= $this->displayConfirmation($this->l('Token regenerado.'));
         }
 
-        $token = Configuration::get('AZETACONNECTOR_TOKEN');
+        $token = Configuration::get('APLPROVEEDORESCONECTOR_TOKEN');
         $base = Tools::getShopDomainSsl(true) . __PS_BASE_URI__;
-        $urlCrear = $base . 'index.php?fc=module&module=azetaconnector&controller=crear';
-        $urlListado = $base . 'index.php?fc=module&module=azetaconnector&controller=listado';
+        $urlCrear = $base . 'index.php?fc=module&module=aplproveedoresconector&controller=crear';
+        $urlListado = $base . 'index.php?fc=module&module=aplproveedoresconector&controller=listado';
 
-        $info = '<div class="panel"><h3>'.$this->l('Datos para tu app AZETA Manager (.env)').'</h3>'
+        $info = '<div class="panel"><h3>'.$this->l('Datos para tu app de proveedores (.env)').'</h3>'
             . '<p><b>PRESTASHOP_URL</b> = <code>'.rtrim($base, '/').'</code></p>'
             . '<p><b>PRESTASHOP_TOKEN</b> = <code>'.htmlspecialchars($token).'</code></p>'
             . '<hr><p class="text-muted">'.$this->l('Endpoints:').'</p>'
@@ -94,12 +97,12 @@ class AzetaConnector extends Module
                     [
                         'type' => 'text',
                         'label' => $this->l('Token de autenticación'),
-                        'name' => 'AZETACONNECTOR_TOKEN',
+                        'name' => 'APLPROVEEDORESCONECTOR_TOKEN',
                         'desc' => $this->l('Debe coincidir con PRESTASHOP_TOKEN en el .env de tu app.'),
                         'size' => 50,
                     ],
                 ],
-                'submit' => ['title' => $this->l('Guardar'), 'name' => 'submitAzetaToken'],
+                'submit' => ['title' => $this->l('Guardar'), 'name' => 'submitToken'],
             ],
         ];
 
@@ -108,8 +111,8 @@ class AzetaConnector extends Module
         $helper->name_controller = $this->name;
         $helper->token = Tools::getAdminTokenLite('AdminModules');
         $helper->currentIndex = AdminController::$currentIndex . '&configure=' . $this->name;
-        $helper->submit_action = 'submitAzetaToken';
-        $helper->fields_value['AZETACONNECTOR_TOKEN'] = Configuration::get('AZETACONNECTOR_TOKEN');
+        $helper->submit_action = 'submitToken';
+        $helper->fields_value['APLPROVEEDORESCONECTOR_TOKEN'] = Configuration::get('APLPROVEEDORESCONECTOR_TOKEN');
 
         return $helper->generateForm([$fields_form]);
     }

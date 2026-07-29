@@ -6,7 +6,7 @@
  *   - impuestos    (reglas de impuestos: id, nombre)
  *
  * Endpoint:
- *   {shop}/index.php?fc=module&module=azetaconnector&controller=opciones
+ *   {shop}/index.php?fc=module&module=aplproveedoresconector&controller=opciones
  * Cuerpo (JSON, POST):  { "token": "..." }
  */
 
@@ -14,7 +14,7 @@ if (!defined('_PS_VERSION_')) {
     exit;
 }
 
-class AzetaConnectorOpcionesModuleFrontController extends ModuleFrontController
+class AplproveedoresconectorOpcionesModuleFrontController extends ModuleFrontController
 {
     public $auth = false;
     public $guestAllowed = true;
@@ -30,7 +30,7 @@ class AzetaConnectorOpcionesModuleFrontController extends ModuleFrontController
             $in = [];
         }
         $token = isset($in['token']) ? $in['token'] : Tools::getValue('token');
-        if (!hash_equals((string) Configuration::get('AZETACONNECTOR_TOKEN'), (string) $token)) {
+        if (!hash_equals((string) Configuration::get('APLPROVEEDORESCONECTOR_TOKEN'), (string) $token)) {
             $this->responder(['success' => false, 'error' => 'Token no autorizado'], 401);
         }
 

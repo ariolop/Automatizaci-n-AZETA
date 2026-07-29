@@ -15,20 +15,60 @@ app = Flask(__name__)
 app.secret_key = "monitor-unificado"
 
 
+POR_PAGINA = 50
+
+
 @app.route("/")
 def index():
     proveedor = request.args.get("proveedor") or None
     estado = request.args.get("estado") or None
-    vigilados = mon.listar(proveedor=proveedor, estado=estado)
+    buscar = (request.args.get("q") or "").strip() or None
+    try:
+        pagina = max(1, int(request.args.get("pagina", 1)))
+    except ValueError:
+        pagina = 1
+    datos = mon.listar_pagina(proveedor=proveedor, estado=estado, buscar=buscar,
+                              pagina=pagina, por_pagina=POR_PAGINA)
     return render_template(
         "monitor.html",
-        vigilados=vigilados,
+        vigilados=datos["filas"],
+        pag=datos,
         resumen=mon.resumen(),
         filtro_proveedor=proveedor or "",
         filtro_estado=estado or "",
+        q=buscar or "",
         supabase_ok=mon.activo(),
         ps_ok=bc.prestashop_configurado(),
     )
+
+
+@app.route("/comprobar-uno", methods=["POST"])
+def comprobar_uno():
+    ean = (request.form.get("ean") or "").strip()
+    proveedor = request.form.get("proveedor") or ""
+    if ean and proveedor:
+        try:
+            r = mon.comprobar_uno(ean, proveedor)
+            if r.get("error"):
+                flash(f"«{ean}» ({proveedor}): {r['error']}", "error")
+            else:
+                flash(f"«{ean}» ({proveedor}) → {r.get('estado')}.", "ok")
+        except Exception as e:  # noqa: BLE001
+            flash(f"Error al comprobar: {e}", "error")
+    return redirect(request.referrer or url_for("index"))
+
+
+@app.route("/cambiar-proveedor", methods=["POST"])
+def cambiar_proveedor():
+    ean = (request.form.get("ean") or "").strip()
+    actual = request.form.get("proveedor") or ""
+    nuevo = request.form.get("nuevo") or ""
+    if ean and actual and nuevo and actual != nuevo:
+        if mon.cambiar_proveedor(ean, actual, nuevo):
+            flash(f"«{ean}»: {actual} → {nuevo} (reasignado y recomprobado).", "ok")
+        else:
+            flash("No se pudo cambiar el proveedor.", "error")
+    return redirect(request.referrer or url_for("index"))
 
 
 @app.route("/add", methods=["POST"])
@@ -72,11 +112,38 @@ def comprobar():
 @app.route("/sincronizar", methods=["POST"])
 def sincronizar():
     try:
-        n = mon.sincronizar_desde_prestashop()
-        flash(f"Sincronizados {n} productos desde PrestaShop (como AZETA).", "ok")
+        r = mon.sincronizar_desde_prestashop()
+        flash(f"Sincronizado con PrestaShop · {r['añadidos']} añadidos · "
+              f"{r['actualizados']} actualizados (EAN/nombre).", "ok")
     except Exception as e:  # noqa: BLE001
         flash(f"No se pudo sincronizar con PrestaShop: {e}", "error")
     return redirect(url_for("index"))
+
+
+@app.route("/editar", methods=["GET", "POST"])
+def editar():
+    if request.method == "POST":
+        ean = (request.form.get("ean") or "").strip()
+        proveedor = request.form.get("proveedor") or ""
+        res = mon.editar(
+            ean, proveedor,
+            nuevo_nombre=request.form.get("nombre"),
+            nuevo_ean=request.form.get("nuevo_ean"),
+            empujar_ps=request.form.get("empujar_ps") == "on",
+        )
+        if res.get("ok"):
+            flash("Cambios guardados" + (" y enviados a PrestaShop." if request.form.get("empujar_ps") == "on" else "."), "ok")
+        else:
+            flash(res.get("error") or "No se pudo guardar.", "error")
+        return redirect(url_for("index"))
+
+    ean = (request.args.get("ean") or "").strip()
+    proveedor = request.args.get("proveedor") or ""
+    v = mon.obtener(ean, proveedor) if ean and proveedor else None
+    if not v:
+        flash("Producto no encontrado.", "error")
+        return redirect(url_for("index"))
+    return render_template("editar.html", v=v)
 
 
 @app.route("/api/historico")

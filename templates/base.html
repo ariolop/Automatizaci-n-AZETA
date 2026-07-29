@@ -57,7 +57,7 @@
     <nav>
       <a href="/">☰ Menú</a>
       <a href="{{ url_for('buscar') }}" class="{{ 'active' if request.endpoint=='buscar' else '' }}">Buscar / Publicar</a>
-      <a href="{{ url_for('lote') }}" class="{{ 'active' if request.endpoint=='lote' else '' }}">Lote</a>
+      <a href="/lote">Lote</a>
       <a href="/monitor">Monitor</a>
       <a href="/config">Configuración</a>
     </nav>

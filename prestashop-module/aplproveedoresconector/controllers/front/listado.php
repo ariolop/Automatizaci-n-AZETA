@@ -4,7 +4,7 @@
  * Devuelve los productos de la tienda (id, ean13, nombre, activo) para el monitor.
  *
  * Endpoint:
- *   {shop}/index.php?fc=module&module=azetaconnector&controller=listado
+ *   {shop}/index.php?fc=module&module=aplproveedoresconector&controller=listado
  *
  * Cuerpo (JSON, POST):  { "token": "...", "solo_con_ean": true }
  */
@@ -13,7 +13,7 @@ if (!defined('_PS_VERSION_')) {
     exit;
 }
 
-class AzetaConnectorListadoModuleFrontController extends ModuleFrontController
+class AplproveedoresconectorListadoModuleFrontController extends ModuleFrontController
 {
     public $auth = false;
     public $guestAllowed = true;
@@ -30,7 +30,7 @@ class AzetaConnectorListadoModuleFrontController extends ModuleFrontController
         }
 
         $token = isset($in['token']) ? $in['token'] : Tools::getValue('token');
-        if (!hash_equals((string) Configuration::get('AZETACONNECTOR_TOKEN'), (string) $token)) {
+        if (!hash_equals((string) Configuration::get('APLPROVEEDORESCONECTOR_TOKEN'), (string) $token)) {
             $this->responder(['success' => false, 'error' => 'Token no autorizado'], 401);
         }
 

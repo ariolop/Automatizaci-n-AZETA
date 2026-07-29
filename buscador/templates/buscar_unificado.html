@@ -27,6 +27,7 @@
   .buscador button{padding:12px 20px;border:none;border-radius:10px;background:var(--accent);
             color:#fff;font-size:15px;font-weight:600;cursor:pointer}
   .buscador button:disabled{opacity:.5;cursor:default}
+  .buscador button.sec{background:var(--panel2);color:var(--txt);border:1px solid var(--line)}
   .provs{display:flex;gap:14px;align-items:center;font-size:14px;color:var(--muted)}
   .provs label{display:flex;gap:6px;align-items:center;cursor:pointer;user-select:none}
   #status{margin:16px 2px;color:var(--muted);font-size:14px;min-height:20px}
@@ -75,7 +76,14 @@
       <label><input type="checkbox" id="cAzeta" checked> AZETA</label>
       <label><input type="checkbox" id="cCs" checked> Liderpapel</label>
     </div>
+    <button type="button" id="btnCam" class="sec">📷 Escanear</button>
     <button id="btn">Buscar</button>
+  </div>
+
+  <div id="camwrap" style="display:none;margin-top:12px;position:relative;max-width:420px">
+    <video id="video" playsinline muted style="width:100%;border-radius:14px;border:1px solid var(--line);background:#000"></video>
+    <button type="button" id="btnCerrarCam" class="sec" style="position:absolute;top:8px;right:8px">Cerrar</button>
+    <div class="muted" style="font-size:12px;margin-top:6px">Apunta al código de barras. Necesita HTTPS y permiso de cámara.</div>
   </div>
 
   <div id="status"></div>
@@ -85,6 +93,7 @@
   <div class="foot">Coste real = precio neto × (1 + IVA% + recargo de equivalencia). Liderpapel no publica IVA: se estima al 21%. Los productos se crean <b>desactivados</b> en PrestaShop.</div>
 </main>
 
+<script src="https://unpkg.com/@zxing/library@0.21.3/umd/index.min.js"></script>
 <script>
 const BASE = "{{ request.script_root }}";
 const PS_OK = {{ 'true' if ps_ok else 'false' }};
@@ -197,6 +206,47 @@ async function monitorizar(btnEl, proveedor, ean, nombre){
 
 btn.addEventListener("click", buscar);
 eanEl.addEventListener("keydown", e=>{ if(e.key==="Enter") buscar(); });
+
+// ---- Lector de código de barras (cámara, ZXing) ----
+const camwrap=$("#camwrap");
+let reader=null, scanning=false, lastCode=null, lastAt=0;
+async function pickBackDeviceId(){
+  try{
+    let listFn=null;
+    if(reader && typeof reader.listVideoInputDevices==="function") listFn=reader.listVideoInputDevices.bind(reader);
+    else if(ZXing.BrowserCodeReader && typeof ZXing.BrowserCodeReader.listVideoInputDevices==="function") listFn=ZXing.BrowserCodeReader.listVideoInputDevices;
+    if(!listFn) return undefined;
+    const ds=await listFn(); if(!ds||!ds.length) return undefined;
+    const back=ds.find(d=>/back|tras|trás|rear|environment/i.test(d.label||""));
+    return (back||ds[ds.length-1]).deviceId;
+  }catch(e){ return undefined; }
+}
+async function startCam(){
+  camwrap.style.display="block";
+  try{
+    const hints=new Map(); const F=ZXing.BarcodeFormat;
+    hints.set(ZXing.DecodeHintType.POSSIBLE_FORMATS,[F.EAN_13,F.EAN_8,F.UPC_A,F.UPC_E,F.CODE_128,F.CODE_39]);
+    reader=new ZXing.BrowserMultiFormatReader(hints,400);
+    const cb=(result,err)=>{ if(result) onCode(result.getText()); };
+    if(typeof reader.decodeFromConstraints==="function"){
+      await reader.decodeFromConstraints({audio:false,video:{facingMode:{ideal:"environment"}}},"video",cb);
+    }else{
+      await reader.decodeFromVideoDevice(await pickBackDeviceId(),"video",cb);
+    }
+    scanning=true; statusEl.textContent="Cámara activa — buscando código…";
+  }catch(e){
+    statusEl.innerHTML=`<span class="msg err">No se pudo abrir la cámara (${esc(e.message||e)}). Escribe el EAN a mano.</span>`;
+    camwrap.style.display="none";
+  }
+}
+function stopCam(){ if(reader){try{reader.reset();}catch(e){}} scanning=false; camwrap.style.display="none"; }
+function onCode(code){
+  const now=Date.now(); if(code===lastCode && now-lastAt<3000) return;
+  lastCode=code; lastAt=now; if(navigator.vibrate) navigator.vibrate(80);
+  eanEl.value=code; stopCam(); buscar();
+}
+$("#btnCam").addEventListener("click", ()=>{ scanning? stopCam() : startCam(); });
+$("#btnCerrarCam").addEventListener("click", stopCam);
 </script>
 </body>
 </html>

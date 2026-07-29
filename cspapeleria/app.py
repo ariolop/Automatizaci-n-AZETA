@@ -54,7 +54,8 @@ def buscar():
 
 @app.route("/lote")
 def lote_form():
-    return render_template("lote.html")
+    # El lote ahora es unificado (AZETA + Liderpapel) a nivel de hub.
+    return redirect("/lote")
 
 
 @app.route("/lote/iniciar", methods=["POST"])

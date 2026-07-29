@@ -47,10 +47,10 @@
     <div class="row" style="gap:16px; margin-top:8px;">
       <div style="flex:1; min-width:220px;">
         <label class="muted">Proveedor AZETA</label>
-        <select name="PRESTASHOP_PROVEEDOR" style="width:100%; padding:10px 12px; border:1px solid var(--bd); border-radius:8px; font-size:15px;">
+        <select name="PRESTASHOP_PROVEEDOR_AZETA" style="width:100%; padding:10px 12px; border:1px solid var(--bd); border-radius:8px; font-size:15px;">
           <option value="">— Sin proveedor —</option>
           {% for p in proveedores %}
-            <option value="{{ p.id }}" {{ 'selected' if cfg.PRESTASHOP_PROVEEDOR == (p.id|string) else '' }}>{{ p.nombre }}</option>
+            <option value="{{ p.id }}" {{ 'selected' if cfg.PRESTASHOP_PROVEEDOR_AZETA == (p.id|string) else '' }}>{{ p.nombre }}</option>
           {% endfor %}
         </select>
       </div>

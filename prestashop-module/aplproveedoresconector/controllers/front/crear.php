@@ -4,7 +4,7 @@
  * Crea un producto DESACTIVADO a partir del JSON enviado por la app AZETA Manager.
  *
  * Endpoint:
- *   {shop}/index.php?fc=module&module=azetaconnector&controller=crear
+ *   {shop}/index.php?fc=module&module=aplproveedoresconector&controller=crear
  *
  * Cuerpo (JSON, POST):
  * {
@@ -22,7 +22,7 @@ if (!defined('_PS_VERSION_')) {
     exit;
 }
 
-class AzetaConnectorCrearModuleFrontController extends ModuleFrontController
+class AplproveedoresconectorCrearModuleFrontController extends ModuleFrontController
 {
     public $auth = false;
     public $guestAllowed = true;
@@ -45,7 +45,7 @@ class AzetaConnectorCrearModuleFrontController extends ModuleFrontController
 
         // Autenticación por token
         $token = isset($in['token']) ? $in['token'] : '';
-        if (!hash_equals((string) Configuration::get('AZETACONNECTOR_TOKEN'), (string) $token)) {
+        if (!hash_equals((string) Configuration::get('APLPROVEEDORESCONECTOR_TOKEN'), (string) $token)) {
             $this->responder(['success' => false, 'error' => 'Token no autorizado'], 401);
         }
 

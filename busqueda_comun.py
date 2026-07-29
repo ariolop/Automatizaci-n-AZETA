@@ -217,7 +217,7 @@ def publicar(proveedor: str, ean: str) -> dict:
         if not raw or not raw.get("encontrado"):
             return {"ok": False, "error": "No se encontró el producto en AZETA."}
         payload = raw  # ya viene con las claves que espera el módulo
-        id_proveedor = cfg.get("PRESTASHOP_PROVEEDOR", "")
+        id_proveedor = cfg.get("PRESTASHOP_PROVEEDOR_AZETA", "")
     elif prov in ("cs", "liderpapel"):
         raw = buscar_cs(ean)
         if not raw or not raw.get("encontrado"):

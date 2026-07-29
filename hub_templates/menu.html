@@ -13,7 +13,7 @@
   body{margin:0;background:var(--bg);color:var(--txt);
        font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;
        min-height:100dvh;display:flex;flex-direction:column;align-items:center}
-  header{width:100%;max-width:760px;padding:28px 20px 8px;text-align:center}
+  header{width:100%;max-width:760px;padding:28px 20px 8px;text-align:center;position:relative}
   h1{margin:0;font-size:22px;letter-spacing:.2px}
   .sub{color:var(--muted);font-size:14px;margin-top:6px}
   main{width:100%;max-width:760px;padding:16px 16px 40px;display:grid;gap:14px}
@@ -34,6 +34,7 @@
 <header>
   <h1>Herramientas AZETA</h1>
   <div class="sub">Elige la aplicación que quieres usar</div>
+  <a href="/logout" style="position:absolute;top:20px;right:20px;color:var(--muted);text-decoration:none;font-size:13px;border:1px solid var(--line);padding:7px 11px;border-radius:9px">Cerrar sesión</a>
 </header>
 <main>
   {% for a in apps %}

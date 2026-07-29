@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Editar vigilado</title>
+<style>
+  :root{--bg:#0f1216;--panel:#171b21;--panel2:#1e242c;--line:#2a323c;--txt:#e7edf3;--muted:#9aa7b4;--accent:#4f8cff}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--txt);font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif}
+  header{display:flex;align-items:center;gap:14px;padding:16px 20px;border-bottom:1px solid var(--line)}
+  header h1{font-size:18px;margin:0}
+  a.lnk{color:var(--muted);text-decoration:none;font-size:13px;border:1px solid var(--line);padding:7px 11px;border-radius:9px;background:var(--panel2)}
+  main{max-width:560px;margin:0 auto;padding:20px}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:20px}
+  label{display:block;color:var(--muted);font-size:13px;margin:12px 0 5px}
+  input[type=text]{width:100%;padding:11px 12px;border-radius:10px;border:1px solid var(--line);background:var(--panel2);color:var(--txt);font-size:15px}
+  .tag{font-size:11px;font-weight:700;padding:2px 8px;border-radius:20px;background:var(--panel2);color:var(--muted)}
+  .ck{display:flex;gap:8px;align-items:center;margin-top:14px;font-size:14px}
+  .muted{color:var(--muted);font-size:13px}
+  button{margin-top:18px;padding:11px 20px;border:none;border-radius:10px;background:var(--accent);color:#fff;font-weight:600;cursor:pointer;font-size:15px}
+</style>
+</head>
+<body>
+<header>
+  <a class="lnk" href="{{ request.script_root }}/">← Monitor</a>
+  <h1>Editar producto vigilado</h1>
+</header>
+<main>
+  <div class="card">
+    <div><span class="tag">{{ v.proveedor }}</span>
+      {% if v.id_prestashop %}<span class="tag">PrestaShop ID {{ v.id_prestashop }}</span>{% endif %}
+    </div>
+    <form method="post" action="{{ request.script_root }}/editar">
+      <input type="hidden" name="proveedor" value="{{ v.proveedor }}">
+      <input type="hidden" name="ean" value="{{ v.ean }}">
+      <label>Nombre</label>
+      <input type="text" name="nombre" value="{{ v.nombre or '' }}">
+      <label>EAN</label>
+      <input type="text" name="nuevo_ean" value="{{ v.ean }}">
+      {% if v.id_prestashop %}
+      <label class="ck"><input type="checkbox" name="empujar_ps" checked> Aplicar también en PrestaShop (mantener ambos iguales)</label>
+      {% else %}
+      <p class="muted" style="margin-top:12px">Este producto no está enlazado a PrestaShop, así que solo se cambia en el monitor.</p>
+      {% endif %}
+      <button type="submit">Guardar cambios</button>
+    </form>
+  </div>
+</main>
+</body>
+</html>

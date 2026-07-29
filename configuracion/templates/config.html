@@ -64,9 +64,9 @@
       <div class="row" style="margin-top:6px">
         <div>
           <label>Proveedor AZETA</label>
-          <select name="PRESTASHOP_PROVEEDOR">
+          <select name="PRESTASHOP_PROVEEDOR_AZETA">
             <option value="">— Sin proveedor —</option>
-            {% for p in proveedores %}<option value="{{ p.id }}" {{ 'selected' if cfg.PRESTASHOP_PROVEEDOR == (p.id|string) }}>{{ p.nombre }}</option>{% endfor %}
+            {% for p in proveedores %}<option value="{{ p.id }}" {{ 'selected' if cfg.PRESTASHOP_PROVEEDOR_AZETA == (p.id|string) }}>{{ p.nombre }}</option>{% endfor %}
           </select>
         </div>
         <div>
@@ -86,7 +86,7 @@
       </div>
       {% else %}
       <div class="row" style="margin-top:6px">
-        <div><label>Proveedor AZETA (id)</label><input type="text" name="PRESTASHOP_PROVEEDOR" value="{{ cfg.PRESTASHOP_PROVEEDOR }}"></div>
+        <div><label>Proveedor AZETA (id)</label><input type="text" name="PRESTASHOP_PROVEEDOR_AZETA" value="{{ cfg.PRESTASHOP_PROVEEDOR_AZETA }}"></div>
         <div><label>Proveedor Liderpapel (id)</label><input type="text" name="PRESTASHOP_PROVEEDOR_CS" value="{{ cfg.PRESTASHOP_PROVEEDOR_CS }}"></div>
         <div><label>Regla de impuestos (id)</label><input type="text" name="PRESTASHOP_IMPUESTOS" value="{{ cfg.PRESTASHOP_IMPUESTOS }}"></div>
       </div>

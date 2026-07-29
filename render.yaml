@@ -39,7 +39,7 @@ services:
         sync: false
       - key: PRESTASHOP_CATEGORIA_DEFECTO
         value: "2"
-      - key: PRESTASHOP_PROVEEDOR
+      - key: PRESTASHOP_PROVEEDOR_AZETA
         sync: false
       - key: PRESTASHOP_PROVEEDOR_CS
         sync: false
@@ -47,11 +47,11 @@ services:
         sync: false
       - key: APLICAR_RECARGO
         value: "1"
-      # --- Acceso a TODA la app (contraseña básica global) ---
-      - key: APP_USER
-        value: admin
-      - key: APP_PASSWORD
+      # --- Autenticación por sesión (login de usuarios en Supabase) ---
+      - key: AUTH_SECRET          # secreto para firmar la cookie de sesión
         sync: false
+      - key: SUPABASE_USUARIOS_TABLE
+        value: usuarios
       # --- Supabase (historial del escáner + monitor unificado) ---
       - key: SUPABASE_URL
         sync: false

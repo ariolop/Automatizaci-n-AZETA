@@ -16,6 +16,9 @@ import requests
 
 import config
 
+# Nombre del módulo en PrestaShop (parte de la URL de los endpoints).
+MODULO = "aplproveedoresconector"
+
 
 class PrestashopError(Exception):
     pass
@@ -30,13 +33,27 @@ class PrestashopClient:
             self.categoria_defecto = int(c.get("PRESTASHOP_CATEGORIA_DEFECTO", "2") or 2)
         except ValueError:
             self.categoria_defecto = 2
-        self.id_proveedor = c.get("PRESTASHOP_PROVEEDOR", "") or ""
+        self.id_proveedor = c.get("PRESTASHOP_PROVEEDOR_AZETA", "") or ""
         self.id_impuestos = c.get("PRESTASHOP_IMPUESTOS", "") or ""
         if not self.url or not self.token:
             raise PrestashopError("Falta configurar PRESTASHOP_URL y PRESTASHOP_TOKEN.")
 
     def _endpoint(self, controller: str) -> str:
-        return f"{self.url}/index.php?fc=module&module=azetaconnector&controller={controller}"
+        return f"{self.url}/index.php?fc=module&module={MODULO}&controller={controller}"
+
+    def actualizar_producto(self, id_product=None, ean=None, cambios: dict | None = None,
+                            timeout: int = 40) -> dict:
+        """Actualiza EAN13 y/o nombre de un producto existente (por id o por ean)."""
+        payload = {"token": self.token, "producto": cambios or {}}
+        if id_product:
+            payload["id_product"] = int(id_product)
+        if ean:
+            payload["ean"] = str(ean)
+        try:
+            r = requests.post(self._endpoint("actualizar"), json=payload, timeout=timeout)
+        except requests.RequestException as e:
+            raise PrestashopError(f"No se pudo conectar con PrestaShop: {e}")
+        return self._parse(r)
 
     def crear_producto(self, datos: dict, id_proveedor=None, timeout: int = 40) -> dict:
         """Envía la ficha del scraper al módulo para crear el producto (desactivado).

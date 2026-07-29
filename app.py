@@ -233,7 +233,8 @@ def configuracion():
 # --------------------------------------------------------------------------- #
 @app.route("/lote")
 def lote():
-    return render_template("lote.html", ps_ok=prestashop_configurado())
+    # El lote ahora es unificado (AZETA + Liderpapel) a nivel de hub.
+    return redirect("/lote")
 
 
 @app.route("/lote/iniciar", methods=["POST"])

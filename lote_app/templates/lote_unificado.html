@@ -1,0 +1,142 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lote unificado · AZETA + Liderpapel</title>
+<style>
+  :root{--bg:#0f1216;--panel:#171b21;--panel2:#1e242c;--line:#2a323c;--txt:#e7edf3;--muted:#9aa7b4;--accent:#4f8cff;--ok:#3ecf8e;--warn:#f4c542;--err:#ff6b6b;--azeta:#4f8cff;--lider:#5aa832}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--txt);font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif}
+  header{display:flex;align-items:center;gap:14px;padding:16px 20px;border-bottom:1px solid var(--line)}
+  header h1{font-size:18px;margin:0}
+  a.lnk{color:var(--muted);text-decoration:none;font-size:13px;border:1px solid var(--line);padding:7px 11px;border-radius:9px;background:var(--panel2)}
+  a.lnk:hover{color:#fff;border-color:var(--accent)}
+  main{max-width:1000px;margin:0 auto;padding:20px}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:18px;margin-bottom:16px}
+  textarea{width:100%;min-height:110px;padding:11px;border-radius:10px;border:1px solid var(--line);background:var(--panel2);color:var(--txt);font-family:monospace;font-size:13px}
+  input[type=text],input[type=file]{padding:9px 10px;border-radius:9px;border:1px solid var(--line);background:var(--panel2);color:var(--txt);font-size:14px}
+  label.ck{display:inline-flex;gap:6px;align-items:center;font-size:14px;color:var(--txt);margin-right:16px}
+  .row{display:flex;gap:14px;flex-wrap:wrap;align-items:center;margin-top:10px}
+  .muted{color:var(--muted);font-size:13px}
+  button{padding:11px 20px;border:none;border-radius:10px;background:var(--accent);color:#fff;font-weight:600;cursor:pointer;font-size:15px}
+  button:disabled{opacity:.5;cursor:default}
+  .grid{display:grid;grid-template-columns:auto auto;gap:6px 10px;font-size:13px;margin:8px 0}
+  table{width:100%;border-collapse:collapse;font-size:13px}
+  th,td{padding:7px 9px;border-bottom:1px solid var(--line);text-align:left}
+  th{color:var(--muted);font-size:11px;text-transform:uppercase}
+  .tag{font-size:11px;font-weight:700;padding:1px 7px;border-radius:20px}
+  .tag.si{background:rgba(62,207,142,.14);color:var(--ok)} .tag.no{background:var(--panel2);color:var(--muted)}
+  .barra{height:8px;background:var(--panel2);border-radius:20px;overflow:hidden;margin:8px 0}
+  .barra>div{height:100%;background:var(--accent);width:0}
+  .warn{background:rgba(244,197,66,.12);color:var(--warn);border-radius:9px;padding:9px 11px;font-size:13px}
+</style>
+</head>
+<body>
+<header>
+  <a class="lnk" href="/">☰ Menú</a>
+  <h1>Lote unificado</h1>
+</header>
+<main>
+  <div class="card">
+    <form id="f">
+      <div class="muted">Pega una lista de EANs (uno por línea, o separados por comas/espacios) o sube un CSV/Excel.</div>
+      <textarea name="texto" placeholder="8411574036708&#10;8411574036630&#10;…"></textarea>
+      <div class="row">
+        <input type="file" name="archivo" accept=".csv,.txt,.xlsx">
+        <input type="text" name="columna" placeholder="Columna (A, B, 1…)" style="width:150px">
+        <input type="text" name="fila_inicial" placeholder="Fila inicial (p. ej. 2)" style="width:170px">
+      </div>
+      <div class="row" style="margin-top:14px">
+        <span class="muted">Proveedores:</span>
+        <label class="ck"><input type="checkbox" name="azeta" checked> AZETA</label>
+        <label class="ck"><input type="checkbox" name="cs" checked> Liderpapel</label>
+      </div>
+      <div class="row">
+        <span class="muted">Acciones:</span>
+        <label class="ck"><input type="checkbox" name="vigilar"> Añadir al monitor</label>
+        {% if ps_ok %}
+        <label class="ck"><input type="checkbox" name="publicar_azeta"> Publicar AZETA en PrestaShop</label>
+        <label class="ck"><input type="checkbox" name="publicar_cs"> Publicar Liderpapel en PrestaShop</label>
+        {% else %}
+        <span class="muted">(PrestaShop sin configurar: publicar deshabilitado)</span>
+        {% endif %}
+      </div>
+      <div class="row" style="margin-top:14px">
+        <button type="submit" id="btn">Procesar lote</button>
+        <a id="csv" class="lnk" style="display:none">⬇ Descargar CSV</a>
+      </div>
+    </form>
+  </div>
+
+  <div class="card" id="panel" style="display:none">
+    <div id="barra" class="muted">Procesando…</div>
+    <div class="barra"><div id="prog"></div></div>
+    <div id="resumen" class="grid"></div>
+    <div style="overflow:auto">
+      <table>
+        <thead><tr><th>EAN</th><th>AZETA</th><th>Liderpapel</th><th>Más barato</th><th>PrestaShop</th></tr></thead>
+        <tbody id="filas"></tbody>
+      </table>
+    </div>
+  </div>
+</main>
+
+<script>
+const BASE="{{ request.script_root }}";
+const f=document.getElementById("f"), btn=document.getElementById("btn");
+const esc=s=>(s??"").toString().replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const fmt=n=>(n===null||n===undefined||n==="")?"—":Number(n).toLocaleString("es-ES",{minimumFractionDigits:2,maximumFractionDigits:2})+" €";
+
+f.addEventListener("submit", async e=>{
+  e.preventDefault(); btn.disabled=true;
+  try{
+    const r=await fetch(`${BASE}/iniciar`,{method:"POST",body:new FormData(f)});
+    const d=await r.json();
+    if(!r.ok){ alert(d.error||"Error"); btn.disabled=false; return; }
+    document.getElementById("panel").style.display="block";
+    document.getElementById("csv").style.display="none";
+    poll(d.job_id, d.total);
+  }catch(e){ alert("Error de red: "+e.message); btn.disabled=false; }
+});
+
+function ladoTxt(p){
+  if(!p) return '<span class="tag no">—</span>';
+  if(!p.encontrado) return '<span class="tag no">no</span>';
+  return `<span class="tag si">${esc(p.nombre||'sí')}</span><br><span class="muted">${fmt(p.coste_real)} coste</span>`;
+}
+function psTxt(pub){
+  if(!pub||!pub.length) return "—";
+  return pub.map(x=>{
+    if(x.estado==='publicado') return `<span class="tag si">${esc(x.prov)}: ID ${esc(x.id)}</span>`;
+    if(x.estado==='ya_existe') return `<span class="muted">${esc(x.prov)}: ya existe</span>`;
+    return `<span style="color:var(--err)">${esc(x.prov)}: ${esc(x.error||'error')}</span>`;
+  }).join("<br>");
+}
+
+async function poll(jid,total){
+  const r=await fetch(`${BASE}/estado/${jid}`); const j=await r.json();
+  const pct = j.total? Math.round(100*j.procesados/j.total):0;
+  document.getElementById("prog").style.width=pct+"%";
+  document.getElementById("barra").textContent=`Procesados ${j.procesados||0} de ${j.total||total}`;
+  const rs=j.resumen||{};
+  document.getElementById("resumen").innerHTML=
+    `<div class="muted">Encontrados</div><div>${rs.encontrados||0}</div>
+     <div class="muted">Vigilados</div><div>${rs.vigilados||0}</div>
+     <div class="muted">Publicados</div><div>${rs.publicados||0}</div>
+     <div class="muted">Errores</div><div>${rs.errores||0}</div>`;
+  const tb=document.getElementById("filas"); tb.innerHTML="";
+  (j.items||[]).forEach(it=>{
+    tb.insertAdjacentHTML("beforeend",
+      `<tr><td>${esc(it.ean)}</td><td>${ladoTxt(it.azeta)}</td><td>${ladoTxt(it.cs)}</td>
+       <td>${esc(it.mas_barato||'—')}</td><td>${psTxt(it.publicados)}</td></tr>`);
+  });
+  if(j.estado==="en_curso"){ setTimeout(()=>poll(jid,total),1200); }
+  else{
+    btn.disabled=false;
+    const c=document.getElementById("csv"); c.href=`${BASE}/csv/${jid}`; c.style.display="inline-block";
+  }
+}
+</script>
+</body>
+</html>

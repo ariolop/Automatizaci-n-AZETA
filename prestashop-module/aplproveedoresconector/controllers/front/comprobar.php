@@ -4,7 +4,7 @@
  * Indica cuáles de los EANs recibidos YA existen en la tienda.
  *
  * Endpoint:
- *   {shop}/index.php?fc=module&module=azetaconnector&controller=comprobar
+ *   {shop}/index.php?fc=module&module=aplproveedoresconector&controller=comprobar
  * Cuerpo (JSON, POST):  { "token": "...", "eans": ["...","..."] }
  * Respuesta:
  *   { "success": true, "existentes": { "<ean>": {"id":N,"activo":bool,"nombre":"..."} } }
@@ -14,7 +14,7 @@ if (!defined('_PS_VERSION_')) {
     exit;
 }
 
-class AzetaConnectorComprobarModuleFrontController extends ModuleFrontController
+class AplproveedoresconectorComprobarModuleFrontController extends ModuleFrontController
 {
     public $auth = false;
     public $guestAllowed = true;
@@ -30,7 +30,7 @@ class AzetaConnectorComprobarModuleFrontController extends ModuleFrontController
             $in = [];
         }
         $token = isset($in['token']) ? $in['token'] : Tools::getValue('token');
-        if (!hash_equals((string) Configuration::get('AZETACONNECTOR_TOKEN'), (string) $token)) {
+        if (!hash_equals((string) Configuration::get('APLPROVEEDORESCONECTOR_TOKEN'), (string) $token)) {
             $this->responder(['success' => false, 'error' => 'Token no autorizado'], 401);
         }
 

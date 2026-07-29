@@ -97,17 +97,83 @@ def listar(proveedor: str | None = None, estado: str | None = None,
     return []
 
 
+def _contar(filtros: dict) -> int:
+    """Cuenta filas que cumplen 'filtros' sin traerlas (Content-Range)."""
+    if not activo():
+        return 0
+    params = {"select": "id", **filtros, "limit": "1"}
+    try:
+        r = requests.get(_url(TABLA), params=params,
+                        headers=_headers({"Prefer": "count=exact", "Range-Unit": "items", "Range": "0-0"}),
+                        timeout=_TIMEOUT)
+        cr = r.headers.get("Content-Range", "")  # p. ej. "0-0/8234"
+        if "/" in cr:
+            total = cr.split("/")[-1]
+            return int(total) if total.isdigit() else 0
+    except Exception as e:  # noqa: BLE001
+        print(f"[monitor] no se pudo contar: {e}")
+    return 0
+
+
 def resumen() -> dict:
-    """Conteos por proveedor y de incidencias (agotado/desaparecido)."""
-    filas = listar(solo_activos=True)
-    res = {"total": 0, "por_proveedor": {}, "incidencias": 0}
-    for f in filas:
-        res["total"] += 1
-        prov = f.get("proveedor") or "?"
-        res["por_proveedor"][prov] = res["por_proveedor"].get(prov, 0) + 1
-        if f.get("estado") in ("agotado", "desaparecido"):
-            res["incidencias"] += 1
-    return res
+    """Conteos por proveedor e incidencias, eficiente (sin traer todas las filas)."""
+    base = {"activo": "eq.true"}
+    return {
+        "total": _contar(base),
+        "por_proveedor": {
+            "AZETA": _contar({**base, "proveedor": "eq.AZETA"}),
+            "Liderpapel": _contar({**base, "proveedor": "eq.Liderpapel"}),
+        },
+        "incidencias": _contar({**base, "estado": "in.(agotado,desaparecido)"}),
+    }
+
+
+def listar_pagina(proveedor: str | None = None, estado: str | None = None,
+                  buscar: str | None = None, pagina: int = 1, por_pagina: int = 50) -> dict:
+    """Página de vigilados con filtros + búsqueda de texto (ean/nombre).
+    Devuelve {filas, total, pagina, por_pagina, paginas}."""
+    if not activo():
+        return {"filas": [], "total": 0, "pagina": 1, "por_pagina": por_pagina, "paginas": 0}
+    pagina = max(1, int(pagina))
+    desde = (pagina - 1) * por_pagina
+    hasta = desde + por_pagina - 1
+    params = {"select": "*", "order": "nombre.asc.nullslast"}
+    if proveedor:
+        params["proveedor"] = f"eq.{normalizar_proveedor(proveedor)}"
+    if estado:
+        params["estado"] = f"eq.{estado}"
+    if buscar:
+        t = buscar.replace(",", " ").strip()
+        params["or"] = f"(ean.ilike.*{t}*,nombre.ilike.*{t}*)"
+    try:
+        r = requests.get(_url(TABLA), params=params,
+                        headers=_headers({"Prefer": "count=exact", "Range-Unit": "items",
+                                          "Range": f"{desde}-{hasta}"}),
+                        timeout=_TIMEOUT)
+        filas = r.json() if r.status_code < 300 else []
+        cr = r.headers.get("Content-Range", "")
+        total = int(cr.split("/")[-1]) if "/" in cr and cr.split("/")[-1].isdigit() else len(filas)
+    except Exception as e:  # noqa: BLE001
+        print(f"[monitor] no se pudo paginar: {e}")
+        filas, total = [], 0
+    paginas = (total + por_pagina - 1) // por_pagina if por_pagina else 1
+    return {"filas": filas, "total": total, "pagina": pagina,
+            "por_pagina": por_pagina, "paginas": paginas}
+
+
+def obtener(ean: str, proveedor: str) -> dict | None:
+    if not activo():
+        return None
+    params = {"select": "*", "ean": f"eq.{ean}",
+              "proveedor": f"eq.{normalizar_proveedor(proveedor)}", "limit": "1"}
+    try:
+        r = requests.get(_url(TABLA), params=params, headers=_headers(), timeout=_TIMEOUT)
+        if r.status_code < 300:
+            filas = r.json()
+            return filas[0] if filas else None
+    except Exception as e:  # noqa: BLE001
+        print(f"[monitor] no se pudo obtener: {e}")
+    return None
 
 
 def historico_de(ean: str, proveedor: str, limite: int = 100) -> list[dict]:
@@ -254,6 +320,34 @@ def _comprobar_uno(v: dict) -> dict:
     return {"ean": ean, "proveedor": prov, "estado": estado, "incidencia": incidencia}
 
 
+def comprobar_uno(ean: str, proveedor: str) -> dict:
+    """Recomprueba una sola fila (ean, proveedor) y actualiza su estado."""
+    v = obtener(ean, proveedor) or {"ean": ean, "proveedor": normalizar_proveedor(proveedor)}
+    return _comprobar_uno(v)
+
+
+def cambiar_proveedor(ean: str, proveedor_viejo: str, proveedor_nuevo: str) -> bool:
+    """Reasigna una fila vigilada a otro proveedor (p. ej. AZETA -> Liderpapel).
+    Copia los datos, crea la fila nueva, borra la vieja y la recomprueba."""
+    viejo = normalizar_proveedor(proveedor_viejo)
+    nuevo = normalizar_proveedor(proveedor_nuevo)
+    if viejo == nuevo:
+        return False
+    row = obtener(ean, viejo)
+    if not row:
+        return False
+    ok = añadir(ean, nuevo, nombre=row.get("nombre"), origen=row.get("origen") or "manual",
+                id_prestashop=row.get("id_prestashop"))
+    if not ok:
+        return False
+    quitar(ean, viejo)
+    try:
+        comprobar_uno(ean, nuevo)   # actualizar estado con el proveedor correcto
+    except Exception:  # noqa: BLE001
+        pass
+    return True
+
+
 def comprobar_todos(proveedor: str | None = None) -> dict:
     """Recomprueba todos los vigilados activos (o solo los de un proveedor)."""
     vigilados = listar(proveedor=proveedor, solo_activos=True)
@@ -270,18 +364,85 @@ def comprobar_todos(proveedor: str | None = None) -> dict:
 
 
 # --------------------------------------------------------------------------- #
-# Sincronización desde PrestaShop (añade como vigilados de AZETA)
+# Edición (con empuje a PrestaShop) y sincronización bidireccional
 # --------------------------------------------------------------------------- #
-def sincronizar_desde_prestashop() -> int:
-    """Trae los productos de PrestaShop y los añade al monitor como AZETA."""
+def editar(ean: str, proveedor: str, nuevo_nombre: str | None = None,
+           nuevo_ean: str | None = None, empujar_ps: bool = True) -> dict:
+    """Edita nombre y/o EAN de un vigilado. Si tiene id_prestashop y empujar_ps,
+    actualiza también el producto en PrestaShop (para mantener ambos iguales)."""
+    prov = normalizar_proveedor(proveedor)
+    row = obtener(ean, prov)
+    if not row:
+        return {"ok": False, "error": "No se encontró el producto vigilado."}
+
+    nuevo_ean = (nuevo_ean or "").strip() or None
+    nuevo_nombre = (nuevo_nombre if nuevo_nombre is not None else None)
+
+    # 1) Empujar a PrestaShop primero (si procede); si falla, no divergemos.
+    if empujar_ps and row.get("id_prestashop"):
+        cambios_ps = {}
+        if nuevo_ean and nuevo_ean != str(row.get("ean")):
+            cambios_ps["ean13"] = nuevo_ean
+        if nuevo_nombre and nuevo_nombre != (row.get("nombre") or ""):
+            cambios_ps["nombre"] = nuevo_nombre
+        if cambios_ps:
+            try:
+                from prestashop_client import PrestashopClient
+                PrestashopClient().actualizar_producto(id_product=row["id_prestashop"], cambios=cambios_ps)
+            except Exception as e:  # noqa: BLE001
+                return {"ok": False, "error": f"No se pudo actualizar en PrestaShop: {e}"}
+
+    # 2) Actualizar la fila del monitor.
+    cambios = {}
+    if nuevo_nombre is not None:
+        cambios["nombre"] = nuevo_nombre
+    if nuevo_ean and nuevo_ean != str(row.get("ean")):
+        cambios["ean"] = nuevo_ean
+    if cambios:
+        _patch(ean, prov, cambios)
+    return {"ok": True}
+
+
+def _filas_con_ps() -> list[dict]:
+    """Filas del monitor que están enlazadas a un producto de PrestaShop."""
+    if not activo():
+        return []
+    params = {"select": "ean,proveedor,nombre,id_prestashop", "id_prestashop": "not.is.null", "limit": "10000"}
+    try:
+        r = requests.get(_url(TABLA), params=params, headers=_headers(), timeout=_TIMEOUT)
+        return r.json() if r.status_code < 300 else []
+    except Exception:  # noqa: BLE001
+        return []
+
+
+def sincronizar_desde_prestashop() -> dict:
+    """Bidireccional (PS -> monitor): trae los productos de PrestaShop; a los ya
+    enlazados por id les actualiza EAN/nombre, y añade los que no estén vigilados.
+    Devuelve {añadidos, actualizados}."""
     from prestashop_client import PrestashopClient
     productos = PrestashopClient().listar_productos()
-    n = 0
-    for p in productos:
-        ean = p.get("ean13") or p.get("ean")
-        if not ean:
+    por_id = {}
+    for f in _filas_con_ps():
+        try:
+            por_id[int(f["id_prestashop"])] = f
+        except (TypeError, ValueError):
             continue
-        if añadir(ean, "AZETA", nombre=p.get("nombre"), origen="prestashop",
-                  id_prestashop=p.get("id") or p.get("id_product")):
-            n += 1
-    return n
+    añadidos = actualizados = 0
+    for p in productos:
+        pid = p.get("id") or p.get("id_product")
+        ean = p.get("ean13") or p.get("ean")
+        nombre = p.get("nombre")
+        row = por_id.get(int(pid)) if pid is not None else None
+        if row:
+            cambios = {}
+            if ean and str(row.get("ean")) != str(ean):
+                cambios["ean"] = str(ean)
+            if nombre and (row.get("nombre") or "") != nombre:
+                cambios["nombre"] = nombre
+            if cambios:
+                _patch(row["ean"], row["proveedor"], cambios)
+                actualizados += 1
+        elif ean:
+            if añadir(ean, "AZETA", nombre=nombre, origen="prestashop", id_prestashop=pid):
+                añadidos += 1
+    return {"añadidos": añadidos, "actualizados": actualizados}

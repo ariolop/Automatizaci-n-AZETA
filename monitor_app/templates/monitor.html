@@ -92,19 +92,20 @@
   </div>
 
   <form method="get" class="bar" style="justify-content:flex-start">
-    <span class="muted">Filtrar:</span>
-    <select name="proveedor" onchange="this.form.submit()">
+    <input type="text" name="q" value="{{ q }}" placeholder="Buscar EAN o nombre…" style="min-width:200px">
+    <select name="proveedor">
       <option value="">Todos los proveedores</option>
       <option value="AZETA" {{ 'selected' if filtro_proveedor=='AZETA' }}>AZETA</option>
       <option value="Liderpapel" {{ 'selected' if filtro_proveedor=='Liderpapel' }}>Liderpapel</option>
     </select>
-    <select name="estado" onchange="this.form.submit()">
+    <select name="estado">
       <option value="">Todos los estados</option>
       <option value="disponible" {{ 'selected' if filtro_estado=='disponible' }}>Disponible</option>
       <option value="agotado" {{ 'selected' if filtro_estado=='agotado' }}>Agotado</option>
       <option value="desaparecido" {{ 'selected' if filtro_estado=='desaparecido' }}>Desaparecido</option>
     </select>
-    {% if filtro_proveedor or filtro_estado %}<a class="lnk" href="{{ request.script_root }}/">Limpiar</a>{% endif %}
+    <button type="submit">Filtrar</button>
+    {% if filtro_proveedor or filtro_estado or q %}<a class="lnk" href="{{ request.script_root }}/">Limpiar</a>{% endif %}
   </form>
 
   {% if vigilados %}
@@ -121,15 +122,25 @@
         <td>{{ v.ean }}</td>
         <td>{{ v.nombre or '—' }}</td>
         <td><span class="est {{ v.estado or 'desconocido' }}">{{ v.estado or '—' }}</span></td>
-        <td class="right">{{ v.stock if v.stock is not none else '—' }}</td>
-        <td class="right">{{ '%.2f €'|format(v.precio_neto) if v.precio_neto is not none else '—' }}</td>
-        <td class="right">{{ '%.2f €'|format(v.coste_real) if v.coste_real is not none else '—' }}</td>
+        <td class="right">{{ v.get('stock') if v.get('stock') is not none else '—' }}</td>
+        <td class="right">{{ '%.2f €'|format(v.get('precio_neto')) if v.get('precio_neto') is not none else '—' }}</td>
+        <td class="right">{{ '%.2f €'|format(v.get('coste_real')) if v.get('coste_real') is not none else '—' }}</td>
         <td class="muted">{{ (v.ultima_revision or '')[:16].replace('T',' ') or '—' }}</td>
-        <td class="right">
-          <form method="post" action="{{ request.script_root }}/quitar" style="margin:0"
+        <td class="right" style="white-space:nowrap">
+          <a class="icon" href="{{ request.script_root }}/editar?ean={{ v.ean }}&proveedor={{ v.proveedor }}" title="Editar">editar</a>
+          <form method="post" action="{{ request.script_root }}/comprobar-uno" style="display:inline;margin:0">
+            <input type="hidden" name="ean" value="{{ v.ean }}"><input type="hidden" name="proveedor" value="{{ v.proveedor }}">
+            <button class="icon" type="submit" title="Comprobar ahora">↻</button>
+          </form>
+          <form method="post" action="{{ request.script_root }}/cambiar-proveedor" style="display:inline;margin:0"
+                onsubmit="return confirm('¿Reasignar {{ v.ean }} a {{ 'Liderpapel' if v.proveedor=='AZETA' else 'AZETA' }}?')">
+            <input type="hidden" name="ean" value="{{ v.ean }}"><input type="hidden" name="proveedor" value="{{ v.proveedor }}">
+            <input type="hidden" name="nuevo" value="{{ 'Liderpapel' if v.proveedor=='AZETA' else 'AZETA' }}">
+            <button class="icon" type="submit" title="Cambiar proveedor">→ {{ 'Lider' if v.proveedor=='AZETA' else 'AZETA' }}</button>
+          </form>
+          <form method="post" action="{{ request.script_root }}/quitar" style="display:inline;margin:0"
                 onsubmit="return confirm('¿Quitar {{ v.ean }} ({{ v.proveedor }}) del monitor?')">
-            <input type="hidden" name="ean" value="{{ v.ean }}">
-            <input type="hidden" name="proveedor" value="{{ v.proveedor }}">
+            <input type="hidden" name="ean" value="{{ v.ean }}"><input type="hidden" name="proveedor" value="{{ v.proveedor }}">
             <button class="icon" type="submit">quitar</button>
           </form>
         </td>
@@ -137,6 +148,14 @@
     {% endfor %}
     </tbody>
   </table>
+  {% set qs = '&q=' ~ (q|urlencode) ~ '&proveedor=' ~ filtro_proveedor ~ '&estado=' ~ filtro_estado %}
+  <div class="bar" style="justify-content:space-between;margin-top:14px">
+    <span class="muted">Página {{ pag.pagina }} de {{ pag.paginas or 1 }} · {{ pag.total }} vigilados en total</span>
+    <span style="display:flex;gap:8px">
+      {% if pag.pagina > 1 %}<a class="lnk" href="?pagina={{ pag.pagina-1 }}{{ qs }}">‹ Anterior</a>{% endif %}
+      {% if pag.pagina < pag.paginas %}<a class="lnk" href="?pagina={{ pag.pagina+1 }}{{ qs }}">Siguiente ›</a>{% endif %}
+    </span>
+  </div>
   {% else %}
     <div class="vacio">No hay productos vigilados{{ ' con ese filtro' if (filtro_proveedor or filtro_estado) else '' }}. Añade un EAN arriba.</div>
   {% endif %}

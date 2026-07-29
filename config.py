@@ -23,7 +23,7 @@ CLAVES = {
     "PRESTASHOP_URL": "",
     "PRESTASHOP_TOKEN": "",
     "PRESTASHOP_CATEGORIA_DEFECTO": "2",
-    "PRESTASHOP_PROVEEDOR": "",        # id del proveedor AZETA a asignar a los productos
+    "PRESTASHOP_PROVEEDOR_AZETA": "",  # id del proveedor AZETA a asignar a los productos
     "PRESTASHOP_PROVEEDOR_CS": "",     # id del proveedor "Comercial del sur" (Liderpapel)
     "PRESTASHOP_IMPUESTOS": "",        # id_tax_rules_group a aplicar a los productos
     "APLICAR_RECARGO": "1",            # aplicar recargo de equivalencia al coste real

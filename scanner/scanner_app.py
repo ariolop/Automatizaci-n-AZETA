@@ -75,14 +75,8 @@ APP_PASSWORD = os.environ.get("APP_PASSWORD")
 
 @app.before_request
 def _proteger():
-    if not APP_PASSWORD or request.path == "/salud":
-        return None
-    auth = request.authorization
-    if not auth or auth.username != APP_USER or auth.password != APP_PASSWORD:
-        return Response(
-            "Acceso restringido.", 401,
-            {"WWW-Authenticate": 'Basic realm="Escaner AZETA + Liderpapel"'},
-        )
+    # La autenticación ahora es global (sesión del hub). Se deja como no-op
+    # para no duplicar el prompt de Basic Auth cuando corre bajo el hub.
     return None
 
 
