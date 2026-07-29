@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Herramientas AZETA</title>
+<style>
+  :root{
+    --bg:#0f1216; --panel:#171b21; --panel2:#1e242c; --line:#2a323c;
+    --txt:#e7edf3; --muted:#9aa7b4; --accent:#4f8cff;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--txt);
+       font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;
+       min-height:100dvh;display:flex;flex-direction:column;align-items:center}
+  header{width:100%;max-width:760px;padding:28px 20px 8px;text-align:center}
+  h1{margin:0;font-size:22px;letter-spacing:.2px}
+  .sub{color:var(--muted);font-size:14px;margin-top:6px}
+  main{width:100%;max-width:760px;padding:16px 16px 40px;display:grid;gap:14px}
+  a.card{display:flex;gap:16px;align-items:center;text-decoration:none;color:inherit;
+         background:var(--panel);border:1px solid var(--line);border-radius:16px;
+         padding:18px 18px;transition:.15s border-color,.15s transform,.15s background}
+  a.card:hover{border-color:var(--accent);background:var(--panel2);transform:translateY(-1px)}
+  a.card.destacado{border-color:var(--accent);background:linear-gradient(180deg,rgba(79,140,255,.10),var(--panel))}
+  .ic{flex:0 0 auto;width:52px;height:52px;border-radius:14px;background:var(--panel2);
+      border:1px solid var(--line);display:flex;align-items:center;justify-content:center;font-size:26px}
+  .tt{font-size:17px;font-weight:600}
+  .dd{color:var(--muted);font-size:13.5px;margin-top:3px;line-height:1.35}
+  .arw{margin-left:auto;color:var(--muted);font-size:22px}
+  footer{color:var(--muted);font-size:12px;padding:8px 20px 28px;text-align:center}
+</style>
+</head>
+<body>
+<header>
+  <h1>Herramientas AZETA</h1>
+  <div class="sub">Elige la aplicación que quieres usar</div>
+</header>
+<main>
+  {% for a in apps %}
+  <a class="card {{ 'destacado' if a.destacado else '' }}" href="{{ a.url }}">
+    <div class="ic">{{ a.icon }}</div>
+    <div>
+      <div class="tt">{{ a.nombre }}</div>
+      <div class="dd">{{ a.desc }}</div>
+    </div>
+    <div class="arw">›</div>
+  </a>
+  {% endfor %}
+</main>
+<footer>Todas las herramientas en un solo sitio · vuelve aquí desde el enlace «Menú» de cada app</footer>
+</body>
+</html>

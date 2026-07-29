@@ -16,9 +16,9 @@ Uso CLI:
 """
 import argparse
 
-import db
-from cs_login import CSSession, CSError
-from cs_producto import buscar_producto
+from . import db
+from .cs_login import CSSession, CSError
+from .cs_producto import buscar_producto
 
 
 def estado_de(ficha):

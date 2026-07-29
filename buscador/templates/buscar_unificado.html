@@ -1,0 +1,186 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Buscar y publicar · AZETA + Liderpapel</title>
+<style>
+  :root{
+    --bg:#0f1216; --panel:#171b21; --panel2:#1e242c; --line:#2a323c;
+    --txt:#e7edf3; --muted:#9aa7b4; --accent:#4f8cff; --ok:#3ecf8e; --err:#ff6b6b;
+    --azeta:#4f8cff; --lider:#5aa832; --gold:#f4c542;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--txt);
+       font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif}
+  header{display:flex;align-items:center;gap:14px;padding:16px 20px;border-bottom:1px solid var(--line);flex-wrap:wrap}
+  header h1{font-size:18px;margin:0}
+  header .sp{flex:1}
+  a.lnk{color:var(--muted);text-decoration:none;font-size:13px;border:1px solid var(--line);
+        padding:7px 11px;border-radius:9px;background:var(--panel2)}
+  a.lnk:hover{color:var(--txt);border-color:var(--accent)}
+  main{max-width:1000px;margin:0 auto;padding:20px}
+  .buscador{display:flex;gap:10px;flex-wrap:wrap;align-items:center;background:var(--panel);
+            border:1px solid var(--line);border-radius:14px;padding:14px}
+  .buscador input[type=text]{flex:1;min-width:200px;padding:12px;border-radius:10px;border:1px solid var(--line);
+            background:var(--panel2);color:var(--txt);font-size:15px}
+  .buscador button{padding:12px 20px;border:none;border-radius:10px;background:var(--accent);
+            color:#fff;font-size:15px;font-weight:600;cursor:pointer}
+  .buscador button:disabled{opacity:.5;cursor:default}
+  .provs{display:flex;gap:14px;align-items:center;font-size:14px;color:var(--muted)}
+  .provs label{display:flex;gap:6px;align-items:center;cursor:pointer;user-select:none}
+  #status{margin:16px 2px;color:var(--muted);font-size:14px;min-height:20px}
+  .spin{display:inline-block;width:14px;height:14px;border:2px solid var(--muted);border-top-color:transparent;
+        border-radius:50%;animation:g .8s linear infinite;vertical-align:-2px;margin-right:6px}
+  @keyframes g{to{transform:rotate(360deg)}}
+  .cards{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+  @media(max-width:720px){.cards{grid-template-columns:1fr}}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:16px;position:relative;overflow:hidden}
+  .card.azeta{border-top:3px solid var(--azeta)}
+  .card.lider{border-top:3px solid var(--lider)}
+  .card h2{font-size:15px;margin:0 0 4px;display:flex;align-items:center;gap:8px}
+  .tag{font-size:11px;font-weight:700;padding:2px 8px;border-radius:20px;text-transform:uppercase;letter-spacing:.03em}
+  .tag.azeta{background:rgba(79,140,255,.15);color:var(--azeta)}
+  .tag.lider{background:rgba(90,168,50,.18);color:#8fd15a}
+  .barato{background:var(--gold);color:#3a2f00;font-weight:700;font-size:11px;padding:3px 9px;border-radius:20px}
+  .nombre{font-size:16px;font-weight:600;margin:6px 0}
+  .thumb{width:76px;height:76px;object-fit:contain;background:#fff;border-radius:8px;border:1px solid var(--line);float:right;margin-left:10px}
+  .kv{display:grid;grid-template-columns:auto 1fr;gap:3px 12px;font-size:13.5px;margin:10px 0}
+  .kv .k{color:var(--muted)}
+  .coste{font-size:22px;font-weight:700}
+  .muted{color:var(--muted)}
+  .msg{border-radius:9px;padding:9px 11px;font-size:13px;margin-top:10px}
+  .msg.ok{background:rgba(62,207,142,.12);color:var(--ok)}
+  .msg.err{background:rgba(255,107,107,.12);color:var(--err)}
+  .msg.info{background:var(--panel2);color:var(--muted)}
+  .pub{margin-top:12px;width:100%;padding:11px;border:none;border-radius:10px;font-weight:600;cursor:pointer;
+       background:var(--panel2);color:var(--txt);border:1px solid var(--line)}
+  .pub:hover{border-color:var(--accent);color:#fff}
+  .pub:disabled{opacity:.5;cursor:default}
+  .vacio{color:var(--muted);text-align:center;padding:30px 10px}
+  .foot{color:var(--muted);font-size:12px;margin-top:22px;text-align:center}
+</style>
+</head>
+<body>
+<header>
+  <a class="lnk" href="/">☰ Menú</a>
+  <h1>Buscar y publicar</h1>
+  <span class="sp"></span>
+  {% if not ps_ok %}<span class="msg info" style="margin:0">PrestaShop sin configurar · publicar deshabilitado</span>{% endif %}
+</header>
+<main>
+  <div class="buscador">
+    <input id="ean" type="text" inputmode="numeric" placeholder="EAN o texto (p. ej. 8411574036708)" autofocus>
+    <div class="provs">
+      <label><input type="checkbox" id="cAzeta" checked> AZETA</label>
+      <label><input type="checkbox" id="cCs" checked> Liderpapel</label>
+    </div>
+    <button id="btn">Buscar</button>
+  </div>
+
+  <div id="status"></div>
+  <div id="cards" class="cards"></div>
+  <div id="vacio" class="vacio">Introduce un EAN para comparar ambos proveedores.</div>
+
+  <div class="foot">Coste real = precio neto × (1 + IVA% + recargo de equivalencia). Liderpapel no publica IVA: se estima al 21%. Los productos se crean <b>desactivados</b> en PrestaShop.</div>
+</main>
+
+<script>
+const BASE = "{{ request.script_root }}";
+const PS_OK = {{ 'true' if ps_ok else 'false' }};
+const $ = s => document.querySelector(s);
+const eanEl=$("#ean"), btn=$("#btn"), statusEl=$("#status"), cardsEl=$("#cards"), vacioEl=$("#vacio");
+
+const esc = s => (s??"").toString().replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const fmt = n => (n===null||n===undefined||n==="")?"—":Number(n).toLocaleString("es-ES",{minimumFractionDigits:2,maximumFractionDigits:2})+" €";
+
+async function buscar(){
+  const ean=eanEl.value.trim();
+  if(!ean){eanEl.focus();return;}
+  const azeta=$("#cAzeta").checked, cs=$("#cCs").checked;
+  if(!azeta && !cs){statusEl.textContent="Marca al menos un proveedor.";return;}
+  btn.disabled=true; vacioEl.style.display="none"; cardsEl.innerHTML="";
+  statusEl.innerHTML='<span class="spin"></span> Consultando '+[azeta?'AZETA':null,cs?'Liderpapel':null].filter(Boolean).join(' y ')+'…';
+  try{
+    const url=`${BASE}/api/buscar?ean=${encodeURIComponent(ean)}&azeta=${azeta?1:0}&cs=${cs?1:0}`;
+    const r=await fetch(url); const d=await r.json();
+    if(!d.ok){statusEl.innerHTML=`<span class="msg err">${esc(d.error||'Error')}</span>`;btn.disabled=false;return;}
+    render(d);
+  }catch(e){
+    statusEl.innerHTML=`<span class="msg err">Error de red: ${esc(e.message)}</span>`;
+  }finally{ btn.disabled=false; }
+}
+
+function render(d){
+  const c=d.comparacion||{}; const ya=d.ya_prestashop||{};
+  const lados=[["azeta",d.azeta],["lider",d.cs]].filter(x=>x[1]);
+  statusEl.innerHTML = d.encontrado
+    ? (c.mas_barato && c.mas_barato!=='empate' && c.diferencia!=null
+        ? `Más barato: <b>${esc(c.mas_barato)}</b> (diferencia ${fmt(c.diferencia)} por unidad)`
+        : (c.mas_barato==='empate' ? 'Mismo coste en ambos.' : 'Producto encontrado.'))
+    : `<span class="msg err">No se encontró el EAN <b>${esc(d.ean)}</b> en ningún proveedor.</span>`;
+
+  cardsEl.innerHTML = lados.map(([cls,p])=>{
+    const esBarato = c.mas_barato && p.encontrado && (
+      (cls==='azeta' && c.mas_barato==='AZETA') || (cls==='lider' && c.mas_barato==='Liderpapel'));
+    const tag = cls==='azeta' ? '<span class="tag azeta">AZETA</span>' : '<span class="tag lider">Liderpapel</span>';
+    if(!p.encontrado){
+      return `<div class="card ${cls}"><h2>${tag}</h2>
+        <div class="msg ${p.error?'err':'info'}">${esc(p.error||'No encontrado en este proveedor.')}</div></div>`;
+    }
+    const img = (p.imagenes&&p.imagenes[0]) ? `<img class="thumb" src="${esc(p.imagenes[0])}" onerror="this.style.display='none'">` : "";
+    const existe = ya[p.ean];
+    const kv = [];
+    kv.push(["EAN", esc(p.ean||"—")]);
+    if(p.marca) kv.push(["Marca", esc(p.marca)]);
+    kv.push(["Precio neto", fmt(p.precio_neto)]);
+    if(p.stock!=null) kv.push(["Stock", esc(p.stock)]);
+    if(p.disponible!=null) kv.push(["Disponible", p.disponible?"Sí":"No"]);
+    for(const [k,v] of Object.entries(p.extra||{})){ if(v!=null&&v!=='') kv.push([k, esc(v)]); }
+
+    let pubBloque = "";
+    if(PS_OK){
+      if(existe){
+        pubBloque = `<div class="msg info">Ya existe en PrestaShop · ID ${esc(existe.id||existe.id_product||'?')} · ${existe.activo? 'activo':'desactivado'}</div>`;
+      }else{
+        const prov = cls==='azeta' ? 'azeta' : 'cs';
+        pubBloque = `<button class="pub" onclick="publicar(this,'${prov}','${esc(p.ean)}')">Publicar en PrestaShop</button>`;
+      }
+    }
+    return `<div class="card ${cls}">
+      <h2>${tag} ${esBarato?'<span class="barato">★ más barato</span>':''}</h2>
+      ${img}
+      <div class="nombre">${esc(p.nombre||"(sin nombre)")}</div>
+      <div class="coste">${fmt(p.coste_real)} <span class="muted" style="font-size:12px;font-weight:400">coste real/ud</span></div>
+      <div class="kv">${kv.map(([k,v])=>`<div class="k">${k}</div><div>${v}</div>`).join("")}</div>
+      <div class="pubmsg"></div>
+      ${pubBloque}
+    </div>`;
+  }).join("");
+}
+
+async function publicar(btnEl, proveedor, ean){
+  btnEl.disabled=true; const msg=btnEl.parentElement.querySelector(".pubmsg");
+  msg.innerHTML='<div class="msg info"><span class="spin"></span> Publicando…</div>';
+  try{
+    const r=await fetch(`${BASE}/publicar`,{method:"POST",headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({proveedor,ean})});
+    const d=await r.json();
+    if(d.ok){
+      msg.innerHTML=`<div class="msg ok">Creado en PrestaShop (desactivado) · ID ${esc(d.id_product||'?')}</div>`;
+      btnEl.remove();
+    }else{
+      msg.innerHTML=`<div class="msg err">${esc(d.error||'Error al publicar')}</div>`;
+      btnEl.disabled=false;
+    }
+  }catch(e){
+    msg.innerHTML=`<div class="msg err">Error de red: ${esc(e.message)}</div>`;
+    btnEl.disabled=false;
+  }
+}
+
+btn.addEventListener("click", buscar);
+eanEl.addEventListener("keydown", e=>{ if(e.key==="Enter") buscar(); });
+</script>
+</body>
+</html>

@@ -46,11 +46,20 @@
     {% if ps_ok %}
     <div class="row" style="gap:16px; margin-top:8px;">
       <div style="flex:1; min-width:220px;">
-        <label class="muted">Proveedor para los productos</label>
+        <label class="muted">Proveedor AZETA</label>
         <select name="PRESTASHOP_PROVEEDOR" style="width:100%; padding:10px 12px; border:1px solid var(--bd); border-radius:8px; font-size:15px;">
           <option value="">— Sin proveedor —</option>
           {% for p in proveedores %}
             <option value="{{ p.id }}" {{ 'selected' if cfg.PRESTASHOP_PROVEEDOR == (p.id|string) else '' }}>{{ p.nombre }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div style="flex:1; min-width:220px;">
+        <label class="muted">Proveedor Liderpapel (Comercial del sur)</label>
+        <select name="PRESTASHOP_PROVEEDOR_CS" style="width:100%; padding:10px 12px; border:1px solid var(--bd); border-radius:8px; font-size:15px;">
+          <option value="">— Sin proveedor —</option>
+          {% for p in proveedores %}
+            <option value="{{ p.id }}" {{ 'selected' if cfg.PRESTASHOP_PROVEEDOR_CS == (p.id|string) else '' }}>{{ p.nombre }}</option>
           {% endfor %}
         </select>
       </div>
@@ -64,6 +73,7 @@
         </select>
       </div>
     </div>
+    <p class="muted" style="margin-top:6px;">La <b>marca</b> (fabricante) es común a ambos: se asigna por nombre, así que un producto BIC de AZETA y otro de Liderpapel comparten el mismo fabricante en PrestaShop.</p>
     {% endif %}
 
     <h2 style="font-size:15px; margin-top:22px;">Precios</h2>

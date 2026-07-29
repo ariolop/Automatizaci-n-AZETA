@@ -22,10 +22,7 @@ from __future__ import annotations
 
 import os
 import sys
-import threading
-import traceback
 from pathlib import Path
-from concurrent.futures import ThreadPoolExecutor
 
 from flask import Flask, Response, jsonify, render_template, request
 
@@ -53,149 +50,18 @@ _cargar_env(BASE / ".env")       # config del escáner: SUPABASE_*, APP_USER/APP
 _cargar_env(ROOT / ".env")       # AZETA_USER / AZETA_PASSWORD / ...
 _cargar_env(CS_DIR / ".env")     # CS_USER / CS_PASS / CS_IMPERSONATE / ...
 
-# IMPORTANTE el orden: la raíz PRIMERO para que "import config" (que usa AZETA)
-# resuelva al config.py correcto y no al de cspapeleria/.
-sys.path.insert(0, str(CS_DIR))
+# La raíz del repo debe estar en sys.path para importar la lógica común.
 sys.path.insert(0, str(ROOT))
 
-# Importamos los scrapers ya existentes (sus cadenas de import no colisionan:
-# azeta_producto -> azeta_login + config;  cs_producto -> cs_login).
-import azeta_producto                                   # noqa: E402
-import cs_producto                                      # noqa: E402
-from azeta_login import AzetaSession, AzetaError        # noqa: E402
-from cs_login import CSSession, CSError                 # noqa: E402
-
-import historial                                        # noqa: E402  registro en Supabase (opcional)
-
-# --------------------------------------------------------------------------- #
-# Sesiones persistentes (login una vez; se re-loguea si caduca/falla)
-# --------------------------------------------------------------------------- #
-_azeta = {"ses": None, "lock": threading.Lock()}
-_cs = {"ses": None, "lock": threading.Lock()}
-
-
-def _buscar_azeta(ean: str) -> dict:
-    """Consulta AZETA. Nunca lanza: devuelve dict (con 'error' si falla)."""
-    with _azeta["lock"]:
-        for intento in (1, 2):
-            try:
-                if _azeta["ses"] is None:
-                    s = AzetaSession()
-                    s.login()
-                    _azeta["ses"] = s
-                datos = azeta_producto.buscar_producto(ean, sesion=_azeta["ses"])
-                datos["proveedor"] = "AZETA"
-                return datos
-            except AzetaError as e:
-                _azeta["ses"] = None            # forzar re-login en el 2º intento
-                if intento == 2:
-                    return {"proveedor": "AZETA", "encontrado": False,
-                            "error": f"AZETA no disponible: {e}"}
-            except Exception as e:               # noqa: BLE001
-                traceback.print_exc()
-                return {"proveedor": "AZETA", "encontrado": False,
-                        "error": f"Error consultando AZETA: {e}"}
-
-
-def _buscar_cs(ean: str) -> dict:
-    """Consulta Liderpapel/CS. Nunca lanza: devuelve dict (con 'error' si falla)."""
-    with _cs["lock"]:
-        for intento in (1, 2):
-            try:
-                if _cs["ses"] is None:
-                    _cs["ses"] = CSSession()     # login perezoso en la 1ª petición
-                datos = cs_producto.buscar_producto(ean, sesion=_cs["ses"])
-                datos["proveedor"] = "Liderpapel"
-                return datos
-            except CSError as e:
-                _cs["ses"] = None
-                if intento == 2:
-                    return {"proveedor": "Liderpapel", "encontrado": False,
-                            "error": f"Liderpapel no disponible: {e}"}
-            except Exception as e:               # noqa: BLE001
-                traceback.print_exc()
-                return {"proveedor": "Liderpapel", "encontrado": False,
-                        "error": f"Error consultando Liderpapel: {e}"}
-
-
-# --------------------------------------------------------------------------- #
-# Normalización a un formato común para el front
-# --------------------------------------------------------------------------- #
-def _norm_azeta(d: dict) -> dict:
-    return {
-        "proveedor": "AZETA",
-        "encontrado": bool(d.get("encontrado")),
-        "error": d.get("error"),
-        "nombre": d.get("nombre"),
-        "ean": d.get("ean"),
-        "marca": d.get("fabricante"),
-        "disponible": d.get("disponible"),
-        "situacion": d.get("situacion"),
-        "stock": None,
-        "precio_neto": d.get("precio_unidad_sin_iva") or d.get("precio_sin_iva"),
-        "coste_real": d.get("coste_real_unidad"),
-        "pvp": d.get("pvp_recomendado"),
-        "descripcion": d.get("descripcion"),
-        "imagenes": d.get("imagenes") or [],
-        "url": d.get("url_ficha"),
-        "extra": {
-            "IVA %": d.get("iva_pct"),
-            "Uds/envase": d.get("unidades_venta"),
-            "Dropshipping": "Sí" if d.get("dropshipping") else "No",
-            "Material": d.get("material"),
-        },
-    }
-
-
-def _norm_cs(d: dict) -> dict:
-    return {
-        "proveedor": "Liderpapel",
-        "encontrado": bool(d.get("encontrado")),
-        "error": d.get("error") or d.get("motivo"),
-        "nombre": d.get("nombre"),
-        "ean": d.get("ean"),
-        "marca": d.get("marca"),
-        "disponible": d.get("disponible"),
-        "situacion": None,
-        "stock": d.get("stock"),
-        "precio_neto": d.get("precio_neto"),
-        "coste_real": d.get("coste_real"),
-        "pvp": None,
-        "descripcion": d.get("descripcion"),
-        "imagenes": d.get("imagenes") or [],
-        "url": None,
-        "extra": {
-            "IVA % (est.)": d.get("iva"),
-            "Stock": d.get("stock"),
-        },
-    }
-
-
-def _comparar(azeta: dict, cs: dict) -> dict:
-    """Decide el proveedor más barato por coste_real (IVA+recargo por unidad)."""
-    ca = azeta.get("coste_real") if azeta.get("encontrado") else None
-    cc = cs.get("coste_real") if cs.get("encontrado") else None
-    res = {"mas_barato": None, "diferencia": None, "coste_azeta": ca, "coste_cs": cc}
-    if ca is not None and cc is not None:
-        if ca < cc:
-            res["mas_barato"] = "AZETA"
-        elif cc < ca:
-            res["mas_barato"] = "Liderpapel"
-        else:
-            res["mas_barato"] = "empate"
-        res["diferencia"] = round(abs(ca - cc), 2)
-    elif ca is not None:
-        res["mas_barato"] = "AZETA"        # solo uno tiene precio
-    elif cc is not None:
-        res["mas_barato"] = "Liderpapel"
-    return res
-
+# Toda la lógica de búsqueda/normalización/comparación vive en busqueda_comun
+# (compartida con la página unificada /buscar), para no duplicarla.
+import busqueda_comun as bc                                    # noqa: E402
+from . import historial                                        # noqa: E402  registro en Supabase (opcional)
 
 # --------------------------------------------------------------------------- #
 # Flask
 # --------------------------------------------------------------------------- #
 app = Flask(__name__)
-_pool = ThreadPoolExecutor(max_workers=4)
 
 # --- Protección con contraseña básica (solo si se define APP_PASSWORD) --------
 # En local, sin esas variables, la app queda abierta (cómodo para pruebas).
@@ -246,14 +112,9 @@ def api_buscar():
                 "cache_fecha": cache.get("creado_at"),
             })
 
-    # Búsqueda en vivo: los dos proveedores en paralelo.
-    fa = _pool.submit(_buscar_azeta, ean)
-    fc = _pool.submit(_buscar_cs, ean)
-    azeta = _norm_azeta(fa.result())
-    cs = _norm_cs(fc.result())
-
-    encontrado = azeta["encontrado"] or cs["encontrado"]
-    comparacion = _comparar(azeta, cs)
+    # Búsqueda en vivo: los dos proveedores en paralelo (lógica común).
+    res = bc.buscar(ean, con_azeta=True, con_cs=True)
+    azeta, cs, comparacion = res["azeta"], res["cs"], res["comparacion"]
 
     # Registro en Supabase (best-effort, en segundo plano; no bloquea la respuesta
     # ni falla la búsqueda si Supabase no está configurado o da error).
@@ -262,7 +123,7 @@ def api_buscar():
     return jsonify({
         "ok": True,
         "ean": ean,
-        "encontrado": encontrado,
+        "encontrado": res["encontrado"],
         "azeta": azeta,
         "cs": cs,
         "comparacion": comparacion,
@@ -298,7 +159,7 @@ def _ssl_context():
     if cert.exists() and key.exists():
         return (str(cert), str(key))
     try:
-        import gen_cert
+        from . import gen_cert
         gen_cert.generar(cert, key)
         return (str(cert), str(key))
     except Exception as e:                       # noqa: BLE001

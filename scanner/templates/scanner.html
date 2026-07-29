@@ -77,7 +77,8 @@
 <header>
   <span id="dot" class="dot"></span>
   <h1>Escáner AZETA + Liderpapel</h1>
-  <a href="/historial" class="sec" style="text-decoration:none;padding:8px 12px;font-size:13px;border-radius:10px;border:1px solid var(--line);background:var(--panel2);color:var(--txt)">Historial</a>
+  <a href="/" class="sec" style="text-decoration:none;padding:8px 12px;font-size:13px;border-radius:10px;border:1px solid var(--line);background:var(--panel2);color:var(--txt)">☰ Menú</a>
+  <a href="{{ url_for('pagina_historial') }}" class="sec" style="text-decoration:none;padding:8px 12px;font-size:13px;border-radius:10px;border:1px solid var(--line);background:var(--panel2);color:var(--txt)">Historial</a>
   <button id="btnCam" class="sec" style="padding:8px 12px;font-size:13px">Cámara</button>
 </header>
 
@@ -101,6 +102,7 @@
 
 <script src="https://unpkg.com/@zxing/library@0.21.3/umd/index.min.js"></script>
 <script>
+const BASE = "{{ request.script_root }}";   // prefijo de montaje (p. ej. /escaner)
 const $ = s => document.querySelector(s);
 const statusEl = $("#status"), resEl = $("#resultado"), dot = $("#dot");
 let reader = null, scanning = false, lastCode = null, lastAt = 0, busy = false;
@@ -169,7 +171,7 @@ async function buscar(ean, forzar){
                               : '<span class="spin"></span> Consultando…';
   resEl.innerHTML = "";
   try{
-    let url = "/api/buscar?ean=" + encodeURIComponent(ean);
+    let url = BASE + "/api/buscar?ean=" + encodeURIComponent(ean);
     if(forzar) url += "&forzar=1";
     const r = await fetch(url);
     const data = await r.json();

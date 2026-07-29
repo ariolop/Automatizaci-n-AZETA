@@ -1,14 +1,20 @@
-# Blueprint de Render para el escáner AZETA + Liderpapel.
+# Blueprint de Render para la app UNIFICADA (menú + AZETA + CS Papelería + Escáner).
 # En Render: New > Blueprint > conecta este repo. Rellena los valores marcados
 # como "sync: false" (secretos) en el panel: son las credenciales y la contraseña.
+#
+# Rutas una vez desplegado:
+#   /          -> Menú
+#   /azeta     -> AZETA Manager
+#   /cs        -> CS Papelería / Liderpapel
+#   /escaner   -> Escáner de código de barras
 services:
   - type: web
-    name: escaner-azeta-liderpapel
+    name: herramientas-azeta
     runtime: python
     plan: free
-    rootDir: scanner            # la app vive en /scanner; los scrapers, en la raíz del repo
+    # rootDir = raíz del repo: el hub monta las 3 apps por prefijo.
     buildCommand: pip install -r requirements.txt
-    startCommand: gunicorn scanner_app:app --bind 0.0.0.0:$PORT --workers 1 --threads 4 --timeout 120
+    startCommand: gunicorn wsgi:application --bind 0.0.0.0:$PORT --workers 1 --threads 4 --timeout 120
     envVars:
       - key: PYTHON_VERSION
         value: "3.12.5"
@@ -26,7 +32,22 @@ services:
         value: chrome
       - key: CS_IVA_DEFAULT
         value: "21"
-      # --- Acceso a la app (contraseña básica) ---
+      # --- PrestaShop (para publicar productos desde AZETA Manager) ---
+      - key: PRESTASHOP_URL
+        sync: false
+      - key: PRESTASHOP_TOKEN
+        sync: false
+      - key: PRESTASHOP_CATEGORIA_DEFECTO
+        value: "2"
+      - key: PRESTASHOP_PROVEEDOR
+        sync: false
+      - key: PRESTASHOP_PROVEEDOR_CS
+        sync: false
+      - key: PRESTASHOP_IMPUESTOS
+        sync: false
+      - key: APLICAR_RECARGO
+        value: "1"
+      # --- Acceso a TODA la app (contraseña básica global) ---
       - key: APP_USER
         value: admin
       - key: APP_PASSWORD

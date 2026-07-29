@@ -1,5 +1,10 @@
+# Dependencias unificadas de las 3 herramientas (AZETA + CS Papelería + Escáner).
+Flask>=3.0
+gunicorn>=21.2
 requests>=2.31
 beautifulsoup4>=4.12
 lxml>=5.0
-Flask>=3.0
 openpyxl>=3.1
+curl_cffi>=0.7.0
+python-dotenv>=1.0.0
+cryptography>=42.0

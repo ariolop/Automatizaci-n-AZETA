@@ -3,7 +3,7 @@
 {% block contenido %}
 <div class="card">
   <h3 style="margin-top:0">Configuración</h3>
-  <form method="post" action="/config">
+  <form method="post" action="{{ request.script_root }}/config">
     <div class="row">
       <div><label class="muted">Usuario B2B</label><input type="text" name="CS_USER" value="{{ cfg.get('CS_USER','') }}"></div>
       <div><label class="muted">Contraseña</label><input type="password" name="CS_PASS" value="{{ cfg.get('CS_PASS','') }}"></div>

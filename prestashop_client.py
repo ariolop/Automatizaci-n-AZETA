@@ -38,12 +38,17 @@ class PrestashopClient:
     def _endpoint(self, controller: str) -> str:
         return f"{self.url}/index.php?fc=module&module=azetaconnector&controller={controller}"
 
-    def crear_producto(self, datos: dict, timeout: int = 40) -> dict:
-        """Envía la ficha del scraper al módulo para crear el producto (desactivado)."""
+    def crear_producto(self, datos: dict, id_proveedor=None, timeout: int = 40) -> dict:
+        """Envía la ficha del scraper al módulo para crear el producto (desactivado).
+
+        id_proveedor: si se indica, sobrescribe el proveedor por defecto de la
+        configuración (para asignar un proveedor distinto según el origen:
+        AZETA vs Liderpapel / Comercial del sur)."""
+        prov = id_proveedor if id_proveedor is not None else self.id_proveedor
         payload = {
             "token": self.token,
             "id_categoria": self.categoria_defecto,
-            "id_proveedor": int(self.id_proveedor) if str(self.id_proveedor).isdigit() else 0,
+            "id_proveedor": int(prov) if str(prov).isdigit() else 0,
             "id_impuestos": int(self.id_impuestos) if str(self.id_impuestos).isdigit() else 0,
             "producto": {
                 "nombre": datos.get("nombre"),

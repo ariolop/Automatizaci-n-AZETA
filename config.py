@@ -9,6 +9,7 @@ guardar_config(cambios) -> actualiza esas claves en el .env conservando el resto
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 ENV_PATH = Path(__file__).resolve().parent / ".env"
@@ -22,15 +23,25 @@ CLAVES = {
     "PRESTASHOP_URL": "",
     "PRESTASHOP_TOKEN": "",
     "PRESTASHOP_CATEGORIA_DEFECTO": "2",
-    "PRESTASHOP_PROVEEDOR": "",        # id del proveedor a asignar a los productos
+    "PRESTASHOP_PROVEEDOR": "",        # id del proveedor AZETA a asignar a los productos
+    "PRESTASHOP_PROVEEDOR_CS": "",     # id del proveedor "Comercial del sur" (Liderpapel)
     "PRESTASHOP_IMPUESTOS": "",        # id_tax_rules_group a aplicar a los productos
     "APLICAR_RECARGO": "1",            # aplicar recargo de equivalencia al coste real
 }
 
 
 def leer_config() -> dict:
-    """Lee el .env directamente del disco (siempre fresco)."""
+    """Valores de configuración. Precedencia: valor NO vacío del fichero .env >
+    variable de entorno > valor por defecto. Un valor vacío en el .env no anula
+    la variable de entorno (permite desplegar en la nube sin fichero .env)."""
     valores = dict(CLAVES)  # arranca con los defaults
+    # Fallback a variables de entorno (para despliegues sin fichero .env).
+    for clave in valores:
+        env_val = os.environ.get(clave)
+        if env_val not in (None, ""):
+            valores[clave] = env_val
+    # El fichero .env, si existe, tiene prioridad (uso local + Config en caliente),
+    # pero solo con valores NO vacíos (un vacío no debe pisar env/defecto).
     if ENV_PATH.exists():
         for linea in ENV_PATH.read_text(encoding="utf-8").splitlines():
             linea = linea.strip()
@@ -39,6 +50,8 @@ def leer_config() -> dict:
             clave, _, valor = linea.partition("=")
             clave = clave.strip()
             valor = valor.strip().strip('"').strip("'")
+            if valor == "":
+                continue
             if clave in valores:
                 valores[clave] = valor
             else:

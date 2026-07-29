@@ -235,6 +235,7 @@ def configuracion():
             "PRESTASHOP_TOKEN": (request.form.get("PRESTASHOP_TOKEN") or "").strip(),
             "PRESTASHOP_CATEGORIA_DEFECTO": (request.form.get("PRESTASHOP_CATEGORIA_DEFECTO") or "2").strip(),
             "PRESTASHOP_PROVEEDOR": (request.form.get("PRESTASHOP_PROVEEDOR") or "").strip(),
+            "PRESTASHOP_PROVEEDOR_CS": (request.form.get("PRESTASHOP_PROVEEDOR_CS") or "").strip(),
             "PRESTASHOP_IMPUESTOS": (request.form.get("PRESTASHOP_IMPUESTOS") or "").strip(),
             "APLICAR_RECARGO": "1" if request.form.get("APLICAR_RECARGO") == "on" else "0",
         }

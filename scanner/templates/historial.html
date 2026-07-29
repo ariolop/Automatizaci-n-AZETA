@@ -34,7 +34,8 @@
 <body>
 <header>
   <h1>Historial de escaneos</h1>
-  <a class="btn" href="/">← Escáner</a>
+  <a class="btn" href="/">☰ Menú</a>
+  <a class="btn" href="{{ url_for('index') }}">← Escáner</a>
   <a class="btn" href="#" onclick="cargar();return false">Actualizar</a>
 </header>
 <main>
@@ -42,6 +43,7 @@
   <div id="tabla"></div>
 </main>
 <script>
+const BASE = "{{ request.script_root }}";   // prefijo de montaje (p. ej. /escaner)
 const esc=s=>(s??"").toString().replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
 const fmt=n=>(n===null||n===undefined||n==="")?"—":Number(n).toLocaleString("es-ES",{minimumFractionDigits:2,maximumFractionDigits:2});
 function fecha(s){ if(!s) return "—"; const d=new Date(s); return d.toLocaleString("es-ES"); }
@@ -50,7 +52,7 @@ async function cargar(){
   const st=document.getElementById("status"), cont=document.getElementById("tabla");
   st.textContent="Cargando…"; cont.innerHTML="";
   try{
-    const r=await fetch("/api/historial?limite=200"); const d=await r.json();
+    const r=await fetch(BASE + "/api/historial?limite=200"); const d=await r.json();
     if(!d.activo){ st.innerHTML="El historial de Supabase no está configurado. Define <b>SUPABASE_URL</b> y <b>SUPABASE_KEY</b> en el .env."; return; }
     const filas=d.escaneos||[];
     if(!filas.length){ st.textContent="Aún no hay escaneos registrados."; return; }

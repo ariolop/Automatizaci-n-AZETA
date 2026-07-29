@@ -2,7 +2,7 @@
 {% set seccion = "buscar" %}
 {% block contenido %}
 <div class="card">
-  <form method="post" action="/buscar" class="row">
+  <form method="post" action="{{ request.script_root }}/buscar" class="row">
     <input type="text" name="patron" placeholder="EAN o texto del producto" autofocus
            value="{{ r.patron if r else '' }}">
     <div style="flex:0 0 auto"><button type="submit">Buscar</button></div>

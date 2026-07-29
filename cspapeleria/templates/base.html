@@ -39,10 +39,11 @@
   <header>
     <span class="brand">CS Papelería · Liderpapel</span>
     <nav>
-      <a href="/buscar" class="{{ 'active' if seccion=='buscar' else '' }}">Buscar</a>
-      <a href="/lote" class="{{ 'active' if seccion=='lote' else '' }}">Lote</a>
-      <a href="/monitor" class="{{ 'active' if seccion=='monitor' else '' }}">Monitor</a>
-      <a href="/config" class="{{ 'active' if seccion=='config' else '' }}">Config</a>
+      <a href="/">☰ Menú</a>
+      <a href="{{ request.script_root }}/buscar" class="{{ 'active' if seccion=='buscar' else '' }}">Buscar</a>
+      <a href="{{ request.script_root }}/lote" class="{{ 'active' if seccion=='lote' else '' }}">Lote</a>
+      <a href="{{ request.script_root }}/monitor" class="{{ 'active' if seccion=='monitor' else '' }}">Monitor</a>
+      <a href="{{ request.script_root }}/config" class="{{ 'active' if seccion=='config' else '' }}">Config</a>
     </nav>
   </header>
   <main>

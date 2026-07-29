@@ -27,10 +27,11 @@
 </div>
 
 <script>
+const BASE = "{{ request.script_root }}";   // prefijo de montaje (p. ej. /cs)
 const f=document.getElementById('f');
 f.addEventListener('submit', async e=>{
   e.preventDefault();
-  const r=await fetch('/lote/iniciar',{method:'POST',body:new FormData(f)});
+  const r=await fetch(BASE+'/lote/iniciar',{method:'POST',body:new FormData(f)});
   if(!r.ok){alert((await r.json()).error||'Error');return;}
   const {job_id,total}=await r.json();
   document.getElementById('panel').style.display='block';
@@ -39,7 +40,7 @@ f.addEventListener('submit', async e=>{
 });
 function badge(s){const m={disponible:'b-ok',agotado:'b-warn',desaparecido:'b-no'};return `<span class="badge ${m[s]||''}">${s}</span>`;}
 async function poll(jid,total){
-  const r=await fetch('/lote/estado/'+jid); const j=await r.json();
+  const r=await fetch(BASE+'/lote/estado/'+jid); const j=await r.json();
   document.getElementById('barra').textContent=`Procesados ${j.procesados||0} de ${j.total||total}` + (j.estado==='error'?(' · ERROR: '+j.error):'');
   const tb=document.getElementById('filas'); tb.innerHTML='';
   (j.items||[]).forEach(it=>{
@@ -48,7 +49,7 @@ async function poll(jid,total){
       <td>${it.precio_neto??''}</td><td>${it.coste_real??''}</td><td>${it.stock??''}</td></tr>`);
   });
   if(j.estado==='en_curso'){setTimeout(()=>poll(jid,total),1500);}
-  else if(j.estado==='terminado'){const c=document.getElementById('csv');c.href='/lote/csv/'+jid;c.style.display='inline-block';}
+  else if(j.estado==='terminado'){const c=document.getElementById('csv');c.href=BASE+'/lote/csv/'+jid;c.style.display='inline-block';}
 }
 </script>
 {% endblock %}

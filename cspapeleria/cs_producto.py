@@ -20,7 +20,7 @@ import sys
 from urllib.parse import urljoin
 from html import unescape
 
-from cs_login import CSSession, CSError
+from .cs_login import CSSession, CSError
 
 # --- Modelo de coste (IVA + recargo de equivalencia), igual que AZETA --------
 # OJO: el portal B2B de CS Papelería NO publica el % de IVA ni el PVP en la

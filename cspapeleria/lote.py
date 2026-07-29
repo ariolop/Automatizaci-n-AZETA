@@ -11,8 +11,8 @@ import threading
 import time
 import uuid
 
-from cs_login import CSSession, CSError
-from cs_producto import buscar_producto
+from .cs_login import CSSession, CSError
+from .cs_producto import buscar_producto
 
 _JOBS = {}
 _LOCK = threading.Lock()
@@ -90,7 +90,7 @@ def _ejecutar(jid, eans, vigilar):
         job["estado"] = "error"
         job["error"] = str(e)
         return
-    import db
+    from . import db
     if vigilar:
         db.init_db()
     for ean in eans:

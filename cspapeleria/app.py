@@ -14,12 +14,12 @@ import io
 from flask import (Flask, render_template, request, redirect, url_for,
                    flash, jsonify, Response)
 
-import config
-import db
-import lote
-import monitor
-from cs_login import CSSession, CSError
-from cs_producto import buscar_producto
+from . import config
+from . import db
+from . import lote
+from . import monitor
+from .cs_login import CSSession, CSError
+from .cs_producto import buscar_producto
 
 app = Flask(__name__)
 app.secret_key = "cs-papeleria-local"
