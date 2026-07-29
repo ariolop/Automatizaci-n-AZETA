@@ -49,15 +49,22 @@ class AplproveedoresconectorListadoModuleFrontController extends ModuleFrontCont
         }
         $sql .= ' GROUP BY p.id_product ORDER BY pl.name';
 
+        $incluirPrecio = !isset($in['precio']) || $in['precio'];  // por defecto, incluir PVP
         $rows = Db::getInstance()->executeS($sql);
         $productos = [];
         foreach ($rows as $r) {
-            $productos[] = [
+            $item = [
                 'id' => (int) $r['id_product'],
                 'ean13' => $r['ean13'],
                 'nombre' => $r['name'],
                 'activo' => (int) $r['active'] === 1,
             ];
+            if ($incluirPrecio) {
+                $idp = (int) $r['id_product'];
+                $item['precio'] = round((float) Product::getPriceStatic($idp, true), 2);        // PVP con IVA
+                $item['precio_sin_iva'] = round((float) Product::getPriceStatic($idp, false), 2);
+            }
+            $productos[] = $item;
         }
 
         $this->responder(['success' => true, 'total' => count($productos), 'productos' => $productos]);

@@ -1,0 +1,208 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Precios competencia</title>
+<style>
+  :root{--bg:#0f1216;--panel:#171b21;--panel2:#1e242c;--line:#2a323c;--txt:#e7edf3;--muted:#9aa7b4;
+        --accent:#4f8cff;--ok:#3ecf8e;--warn:#f4c542;--err:#ff6b6b}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--txt);font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif}
+  header{display:flex;align-items:center;gap:14px;padding:16px 20px;border-bottom:1px solid var(--line);flex-wrap:wrap}
+  header h1{font-size:18px;margin:0} header .sp{flex:1}
+  a.lnk,button.lnk{color:var(--muted);text-decoration:none;font-size:13px;border:1px solid var(--line);padding:7px 11px;border-radius:9px;background:var(--panel2);cursor:pointer}
+  main{max-width:1100px;margin:0 auto;padding:20px}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:18px;margin-bottom:16px}
+  .card h2{font-size:15px;margin:0 0 12px}
+  textarea{width:100%;min-height:90px;padding:10px;border-radius:10px;border:1px solid var(--line);background:var(--panel2);color:var(--txt);font-family:monospace;font-size:13px}
+  input[type=text],input[type=number],select{padding:9px 10px;border-radius:9px;border:1px solid var(--line);background:var(--panel2);color:var(--txt);font-size:14px}
+  label.ck{display:inline-flex;gap:6px;align-items:center;font-size:14px;margin:0 14px 6px 0}
+  .row{display:flex;gap:14px;flex-wrap:wrap;align-items:center;margin-top:10px}
+  .muted{color:var(--muted);font-size:13px}
+  button{padding:10px 18px;border:none;border-radius:10px;background:var(--accent);color:#fff;font-weight:600;cursor:pointer;font-size:14px}
+  button.sec{background:var(--panel2);color:var(--txt);border:1px solid var(--line)}
+  button:disabled{opacity:.5;cursor:default}
+  .barra{height:8px;background:var(--panel2);border-radius:20px;overflow:hidden;margin:10px 0}
+  .barra>div{height:100%;background:var(--accent);width:0;transition:width .3s}
+  table{width:100%;border-collapse:collapse;font-size:13px}
+  th,td{padding:8px 9px;border-bottom:1px solid var(--line);text-align:left}
+  th{color:var(--muted);font-size:11px;text-transform:uppercase}
+  tr.clic{cursor:pointer} tr.clic:hover td{background:var(--panel2)}
+  .right{text-align:right}
+  .pos{color:var(--err);font-weight:600}  /* tú más caro */
+  .neg{color:var(--ok);font-weight:600}   /* tú más barato */
+  .warn{background:rgba(244,197,66,.12);color:var(--warn);border-radius:9px;padding:10px 12px;font-size:13px;margin-bottom:12px}
+  .tags .tag{display:inline-block;font-size:11px;background:var(--panel2);border:1px solid var(--line);border-radius:20px;padding:2px 8px;margin:2px}
+  #chartWrap{display:none;background:var(--panel2);border:1px solid var(--line);border-radius:12px;padding:14px;margin-top:12px}
+</style>
+</head>
+<body>
+<header>
+  <a class="lnk" href="/">☰ Menú</a>
+  <h1>Precios competencia</h1>
+  <span class="sp"></span>
+  {% if local %}<span class="muted">modo local · ejecución habilitada</span>
+  {% else %}<span class="muted">solo consulta (la ejecución se hace en local)</span>{% endif %}
+</header>
+<main>
+  {% if not supabase_ok %}<div class="warn">Supabase no está configurado: no se puede leer ni guardar el histórico.</div>{% endif %}
+
+  {% if local %}
+  <div class="card">
+    <h2>Revisar precios <span class="muted" style="font-weight:400">(se ejecuta en tu equipo y se guarda en Supabase)</span></h2>
+    <div class="row">
+      <span class="muted">EAN a revisar:</span>
+      <label class="ck"><input type="radio" name="fuente" value="lista" checked> Lista pegada</label>
+      <label class="ck"><input type="radio" name="fuente" value="vigilados"> Los que ya vigilo</label>
+      <label class="ck"><input type="radio" name="fuente" value="catalogo"> Catálogo (con límite)</label>
+    </div>
+    <textarea id="texto" placeholder="Pega EANs (uno por línea o separados)…"></textarea>
+    <div class="row">
+      <label class="muted">Límite <input type="number" id="limite" value="0" min="0" style="width:90px"></label>
+      <label class="muted">Pausa (s) <input type="number" id="pausa" value="2" min="0" step="0.5" style="width:90px"></label>
+      <button id="btnRev">Revisar</button>
+      <button id="btnParar" class="sec" style="display:none">Parar</button>
+    </div>
+    <div class="row tags" style="margin-top:12px">
+      <span class="muted">Tiendas:</span>
+      {% for t in tiendas %}<label class="ck"><input type="checkbox" name="tienda" value="{{ t }}" checked> {{ t }}</label>{% endfor %}
+    </div>
+    <div id="panelProg" style="display:none;margin-top:12px">
+      <div id="progTxt" class="muted">Procesando…</div>
+      <div class="barra"><div id="prog"></div></div>
+    </div>
+    <div class="row" style="margin-top:14px;border-top:1px solid var(--line);padding-top:14px">
+      <span class="muted">Consulta rápida:</span>
+      <input type="text" id="ean1" inputmode="numeric" placeholder="Un EAN" style="width:200px">
+      <button id="btnLookup" class="sec">Consultar</button>
+    </div>
+    <div id="lookupRes"></div>
+  </div>
+  {% endif %}
+
+  <div class="card">
+    <h2>Histórico</h2>
+    <div class="row">
+      <span class="muted">Ejecución:</span>
+      <select id="selRun">
+        <option value="">— elige una revisión —</option>
+        {% for r in runs %}
+        <option value="{{ r.run_id }}">{{ r.fecha }} · {{ r.n_ok or 0 }} con precio · {{ r.estado }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div id="tablaRun" style="margin-top:12px;overflow:auto"></div>
+    <div id="chartWrap"><canvas id="chart" height="120"></canvas></div>
+  </div>
+</main>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.0/chart.umd.min.js"></script>
+<script>
+const BASE="{{ request.script_root }}";
+const $=s=>document.querySelector(s);
+const esc=s=>(s??"").toString().replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const eur=n=>(n===null||n===undefined||n==="")?"—":Number(n).toLocaleString("es-ES",{minimumFractionDigits:2,maximumFractionDigits:2})+" €";
+{% if local %}
+// ---- Ejecución (local) ----
+const btnRev=$("#btnRev"), btnParar=$("#btnParar");
+btnRev.addEventListener("click", async ()=>{
+  const fd=new FormData();
+  fd.append("fuente", document.querySelector('input[name=fuente]:checked').value);
+  fd.append("texto", $("#texto").value);
+  fd.append("limite", $("#limite").value);
+  fd.append("pausa", $("#pausa").value);
+  document.querySelectorAll('input[name=tienda]:checked').forEach(c=>fd.append("tiendas", c.value));
+  btnRev.disabled=true;
+  try{
+    const r=await fetch(`${BASE}/iniciar`,{method:"POST",body:fd}); const d=await r.json();
+    if(!r.ok){ alert(d.error||"Error"); btnRev.disabled=false; return; }
+    $("#panelProg").style.display="block"; btnParar.style.display="inline-block";
+    poll(d.total);
+  }catch(e){ alert("Error de red: "+e.message); btnRev.disabled=false; }
+});
+btnParar.addEventListener("click", ()=>fetch(`${BASE}/parar`,{method:"POST"}));
+async function poll(total){
+  const r=await fetch(`${BASE}/estado`); const j=await r.json();
+  const pct= j.total? Math.round(100*j.done/j.total):0;
+  $("#prog").style.width=pct+"%";
+  $("#progTxt").textContent=`Procesados ${j.done||0}/${j.total||total} · con precio ${j.ok||0}` + (j.current?` · ${j.current}`:"");
+  if(j.running){ setTimeout(()=>poll(total),1000); }
+  else{
+    btnRev.disabled=false; btnParar.style.display="none";
+    $("#progTxt").textContent=`Terminado (${j.estado||''}) · ${j.done||0} EAN · ${j.ok||0} con precio.`;
+    if(j.run_id){ await recargarRuns(j.run_id); }
+  }
+}
+$("#btnLookup").addEventListener("click", async ()=>{
+  const ean=$("#ean1").value.trim(); if(!ean) return;
+  $("#lookupRes").innerHTML='<div class="muted" style="margin-top:8px">Consultando…</div>';
+  try{
+    const r=await fetch(`${BASE}/lookup`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({ean})});
+    const d=await r.json();
+    if(!d.ok){ $("#lookupRes").innerHTML=`<div class="muted">${esc(d.error||'Error')}</div>`; return; }
+    const rows=(d.filas||[]).map(f=>`<tr><td>${esc(f.Tienda)}</td><td>${esc(f.Nombre||'—')}</td><td class="right">${f.Estado==='OK'?eur(f.PrecioNum):esc(f.Estado)}</td></tr>`).join("");
+    $("#lookupRes").innerHTML=`<div class="muted" style="margin:8px 0">Tu PVP: <b>${eur(d.pvp)}</b> — ${esc(d.nombre_ps||'')}</div>
+      <table><thead><tr><th>Tienda</th><th>Nombre</th><th class="right">Precio</th></tr></thead><tbody>${rows}</tbody></table>`;
+  }catch(e){ $("#lookupRes").innerHTML=`<div class="muted">Error: ${esc(e.message)}</div>`; }
+});
+async function recargarRuns(sel){
+  // añade la nueva run al principio del selector y la selecciona
+  const s=$("#selRun");
+  if(![...s.options].some(o=>o.value===sel)){
+    const o=document.createElement("option"); o.value=sel; o.textContent="(nueva) "+sel; s.insertBefore(o,s.options[1]||null);
+  }
+  s.value=sel; cargarRun(sel);
+}
+{% endif %}
+
+// ---- Consulta del histórico (todos) ----
+let chart=null;
+$("#selRun").addEventListener("change", e=>cargarRun(e.target.value));
+async function cargarRun(run_id){
+  const cont=$("#tablaRun"); $("#chartWrap").style.display="none";
+  if(!run_id){ cont.innerHTML=""; return; }
+  cont.innerHTML='<div class="muted">Cargando…</div>';
+  try{
+    const r=await fetch(`${BASE}/run/${run_id}`); const d=await r.json();
+    const comp=d.comparativa||[];
+    if(!comp.length){ cont.innerHTML='<div class="muted">Sin resultados con precio en esta revisión.</div>'; return; }
+    cont.innerHTML=`<table><thead><tr>
+      <th>EAN</th><th>Tu producto</th><th class="right">Tu PVP</th>
+      <th class="right">Competidor más barato</th><th>Tienda</th><th class="right">Dif.</th><th class="right">Nº tiendas</th></tr></thead>
+      <tbody>${comp.map(c=>`
+        <tr class="clic" onclick="verEvolucion('${esc(c.ean)}')">
+          <td>${esc(c.ean)}</td><td>${esc(c.nombre_ps||'—')}</td>
+          <td class="right">${eur(c.pvp)}</td>
+          <td class="right">${eur(c.mas_barato)}</td>
+          <td>${esc(c.tienda_mas_barata||'—')}</td>
+          <td class="right ${c.diferencia_pct>0?'pos':(c.diferencia_pct<0?'neg':'')}">${c.diferencia_pct==null?'—':(c.diferencia_pct>0?'+':'')+c.diferencia_pct+'%'}</td>
+          <td class="right">${c.n_tiendas}</td>
+        </tr>`).join("")}</tbody></table>
+      <div class="muted" style="margin-top:8px">Dif. = cuánto más caro (+) o barato (−) eres frente al competidor más barato. Pincha una fila para ver la evolución.</div>`;
+  }catch(e){ cont.innerHTML=`<div class="muted">Error: ${esc(e.message)}</div>`; }
+}
+
+async function verEvolucion(ean){
+  try{
+    const r=await fetch(`${BASE}/api/historico?ean=${encodeURIComponent(ean)}`); const d=await r.json();
+    const h=d.historico||[]; if(!h.length) return;
+    // series por tienda + PVP
+    const fechas=[...new Set(h.map(x=>x.ts.slice(0,10)))];
+    const tiendas=[...new Set(h.filter(x=>x.estado==='OK'&&x.precio!=null).map(x=>x.tienda))];
+    const ds=tiendas.map((t,i)=>({label:t,data:fechas.map(f=>{
+      const p=h.find(x=>x.tienda===t&&x.ts.slice(0,10)===f&&x.precio!=null); return p?p.precio:null;}),
+      borderColor:`hsl(${i*47%360} 70% 60%)`,spanGaps:true,tension:.2}));
+    const pvp=fechas.map(f=>{const p=h.find(x=>x.ts.slice(0,10)===f&&x.pvp!=null);return p?p.pvp:null;});
+    ds.push({label:"Tu PVP",data:pvp,borderColor:"#e7edf3",borderDash:[6,4],spanGaps:true,tension:.2});
+    $("#chartWrap").style.display="block";
+    if(chart) chart.destroy();
+    chart=new Chart($("#chart"),{type:"line",data:{labels:fechas,datasets:ds},
+      options:{plugins:{legend:{labels:{color:"#9aa7b4"}},title:{display:true,text:"Evolución de precio · EAN "+ean,color:"#e7edf3"}},
+      scales:{x:{ticks:{color:"#9aa7b4"}},y:{ticks:{color:"#9aa7b4"}}}}});
+    $("#chartWrap").scrollIntoView({behavior:"smooth",block:"nearest"});
+  }catch(e){}
+}
+</script>
+</body>
+</html>

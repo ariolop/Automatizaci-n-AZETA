@@ -66,6 +66,7 @@ import auth_comun as auth                         # noqa: E402  Autenticación p
 from buscador import app as buscador_mod         # noqa: E402  Búsqueda + publicar unificada
 from lote_app import app as lote_mod             # noqa: E402  Lote unificado
 from monitor_app import app as monitor_mod       # noqa: E402  Monitor unificado
+from competencia_app import app as competencia_mod  # noqa: E402  Precios competencia
 from configuracion import app as config_mod      # noqa: E402  Configuración central
 import app as azeta_mod                          # noqa: E402  AZETA (raíz)
 from cspapeleria import app as cs_mod            # noqa: E402  CS Papelería / Liderpapel
@@ -74,6 +75,7 @@ from scanner import scanner_app as scanner_mod   # noqa: E402  Escáner
 buscador_app = buscador_mod.app
 lote_app = lote_mod.app
 monitor_app = monitor_mod.app
+competencia_app = competencia_mod.app
 config_app = config_mod.app
 azeta_app = azeta_mod.app
 cs_app = cs_mod.app
@@ -95,6 +97,9 @@ APPS = [
     {"slug": "monitor", "url": "/monitor", "nombre": "Monitor unificado",
      "desc": "Vigila disponibilidad y stock de AZETA y Liderpapel en una sola lista, con su etiqueta de proveedor.",
      "icon": "📊"},
+    {"slug": "competencia", "url": "/competencia", "nombre": "Precios competencia",
+     "desc": "Compara tu PVP con las papelerías rivales y consulta la evolución de precios (histórico en Supabase).",
+     "icon": "🏷️"},
     {"slug": "config",  "url": "/config",  "nombre": "Configuración",
      "desc": "PrestaShop y credenciales de AZETA y Liderpapel, todo en un solo sitio.",
      "icon": "⚙️"},
@@ -148,6 +153,7 @@ _mounted = DispatcherMiddleware(hub, {
     "/buscar": buscador_app,
     "/lote": lote_app,
     "/monitor": monitor_app,
+    "/competencia": competencia_app,
     "/config": config_app,
     "/azeta": azeta_app,
     "/cs": cs_app,

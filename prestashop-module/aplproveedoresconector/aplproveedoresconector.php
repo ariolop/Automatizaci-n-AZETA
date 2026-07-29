@@ -4,7 +4,7 @@
  *
  * Front controllers (autenticados por token):
  *   - controller=crear      : crea un producto DESACTIVADO a partir del JSON recibido.
- *   - controller=listado    : devuelve los productos (id, ean13, nombre, activo).
+ *   - controller=listado    : devuelve los productos (id, ean13, nombre, activo, precio PVP).
  *   - controller=comprobar  : comprueba qué EANs ya existen.
  *   - controller=opciones   : proveedores e impuestos disponibles.
  *   - controller=actualizar : actualiza EAN13/nombre de un producto (sincronización).
@@ -23,7 +23,7 @@ class Aplproveedoresconector extends Module
     {
         $this->name = 'aplproveedoresconector';
         $this->tab = 'administration';
-        $this->version = '1.1.0';
+        $this->version = '1.2.0';
         $this->author = 'Clearis';
         $this->need_instance = 0;
         $this->ps_versions_compliancy = ['min' => '8.0.0', 'max' => '9.99.99'];

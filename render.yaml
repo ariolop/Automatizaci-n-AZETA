@@ -63,3 +63,7 @@ services:
         value: vigilados
       - key: SUPABASE_VIGILADOS_HIST_TABLE
         value: vigilados_historico
+      - key: SUPABASE_COMPETENCIA_TABLE
+        value: precios_competencia
+      - key: SUPABASE_COMPETENCIA_RUNS_TABLE
+        value: precios_competencia_runs
