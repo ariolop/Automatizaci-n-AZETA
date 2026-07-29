@@ -52,10 +52,14 @@ services:
         value: admin
       - key: APP_PASSWORD
         sync: false
-      # --- Historial en Supabase (opcional) ---
+      # --- Supabase (historial del escáner + monitor unificado) ---
       - key: SUPABASE_URL
         sync: false
       - key: SUPABASE_KEY          # usa la key 'service_role' (secreta)
         sync: false
       - key: SUPABASE_TABLE
         value: escaneos
+      - key: SUPABASE_VIGILADOS_TABLE
+        value: vigilados
+      - key: SUPABASE_VIGILADOS_HIST_TABLE
+        value: vigilados_historico

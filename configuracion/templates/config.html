@@ -1,0 +1,132 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Configuración central</title>
+<style>
+  :root{
+    --bg:#0f1216; --panel:#171b21; --panel2:#1e242c; --line:#2a323c;
+    --txt:#e7edf3; --muted:#9aa7b4; --accent:#4f8cff; --ok:#3ecf8e; --err:#ff6b6b;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--txt);font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif}
+  header{display:flex;align-items:center;gap:14px;padding:16px 20px;border-bottom:1px solid var(--line)}
+  header h1{font-size:18px;margin:0}
+  a.lnk{color:var(--muted);text-decoration:none;font-size:13px;border:1px solid var(--line);padding:7px 11px;border-radius:9px;background:var(--panel2)}
+  a.lnk:hover{color:#fff;border-color:var(--accent)}
+  main{max-width:820px;margin:0 auto;padding:20px}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:18px;margin-bottom:16px}
+  .card h2{font-size:15px;margin:0 0 12px}
+  label{display:block;color:var(--muted);font-size:13px;margin:10px 0 4px}
+  input[type=text],input[type=password],select{width:100%;padding:10px 12px;border-radius:9px;border:1px solid var(--line);background:var(--panel2);color:var(--txt);font-size:14px}
+  .row{display:flex;gap:14px;flex-wrap:wrap}.row>div{flex:1;min-width:200px}
+  .ck{display:flex;gap:8px;align-items:center;color:var(--txt);font-size:14px;margin-top:12px}
+  .ck input{width:auto}
+  button{padding:11px 20px;border:none;border-radius:10px;background:var(--accent);color:#fff;font-weight:600;cursor:pointer;font-size:15px}
+  button.sec{background:var(--panel2);color:var(--txt);border:1px solid var(--line)}
+  .flash{padding:10px 13px;border-radius:9px;margin-bottom:12px;font-size:14px}
+  .flash.ok{background:rgba(62,207,142,.12);color:var(--ok)} .flash.error{background:rgba(255,107,107,.12);color:var(--err)}
+  .pill{font-size:12px;padding:3px 9px;border-radius:20px}
+  .pill.ok{background:rgba(62,207,142,.14);color:var(--ok)} .pill.no{background:var(--panel2);color:var(--muted)}
+  .muted{color:var(--muted);font-size:13px}
+</style>
+</head>
+<body>
+<header>
+  <a class="lnk" href="/">☰ Menú</a>
+  <h1>Configuración central</h1>
+</header>
+<main>
+  {% with messages = get_flashed_messages(with_categories=true) %}
+    {% for cat, msg in messages %}<div class="flash {{cat}}">{{ msg }}</div>{% endfor %}
+  {% endwith %}
+
+  <form method="post" action="{{ request.script_root }}/">
+
+    <div class="card">
+      <h2>PrestaShop <span class="pill {{ 'ok' if ps_ok else 'no' }}">{{ 'configurado' if ps_ok else 'sin configurar' }}</span></h2>
+      <div class="row">
+        <div style="flex:2">
+          <label>URL de la tienda (sin barra final)</label>
+          <input type="text" name="PRESTASHOP_URL" value="{{ cfg.PRESTASHOP_URL }}" placeholder="https://apasitoslentos.es">
+        </div>
+        <div>
+          <label>Categoría por defecto (id)</label>
+          <input type="text" name="PRESTASHOP_CATEGORIA_DEFECTO" value="{{ cfg.PRESTASHOP_CATEGORIA_DEFECTO }}">
+        </div>
+      </div>
+      <label>Token del módulo</label>
+      <input type="text" name="PRESTASHOP_TOKEN" value="{{ cfg.PRESTASHOP_TOKEN }}">
+      {% if aviso_ps %}<p class="muted">No se pudieron cargar proveedores/impuestos: {{ aviso_ps }}</p>{% endif %}
+
+      {% if ps_ok %}
+      <div class="row" style="margin-top:6px">
+        <div>
+          <label>Proveedor AZETA</label>
+          <select name="PRESTASHOP_PROVEEDOR">
+            <option value="">— Sin proveedor —</option>
+            {% for p in proveedores %}<option value="{{ p.id }}" {{ 'selected' if cfg.PRESTASHOP_PROVEEDOR == (p.id|string) }}>{{ p.nombre }}</option>{% endfor %}
+          </select>
+        </div>
+        <div>
+          <label>Proveedor Liderpapel (Comercial del sur)</label>
+          <select name="PRESTASHOP_PROVEEDOR_CS">
+            <option value="">— Sin proveedor —</option>
+            {% for p in proveedores %}<option value="{{ p.id }}" {{ 'selected' if cfg.PRESTASHOP_PROVEEDOR_CS == (p.id|string) }}>{{ p.nombre }}</option>{% endfor %}
+          </select>
+        </div>
+        <div>
+          <label>Regla de impuestos</label>
+          <select name="PRESTASHOP_IMPUESTOS">
+            <option value="">— Sin impuestos —</option>
+            {% for t in impuestos %}<option value="{{ t.id }}" {{ 'selected' if cfg.PRESTASHOP_IMPUESTOS == (t.id|string) }}>{{ t.nombre }}</option>{% endfor %}
+          </select>
+        </div>
+      </div>
+      {% else %}
+      <div class="row" style="margin-top:6px">
+        <div><label>Proveedor AZETA (id)</label><input type="text" name="PRESTASHOP_PROVEEDOR" value="{{ cfg.PRESTASHOP_PROVEEDOR }}"></div>
+        <div><label>Proveedor Liderpapel (id)</label><input type="text" name="PRESTASHOP_PROVEEDOR_CS" value="{{ cfg.PRESTASHOP_PROVEEDOR_CS }}"></div>
+        <div><label>Regla de impuestos (id)</label><input type="text" name="PRESTASHOP_IMPUESTOS" value="{{ cfg.PRESTASHOP_IMPUESTOS }}"></div>
+      </div>
+      {% endif %}
+      <p class="muted" style="margin-top:8px">La marca (fabricante) es común a ambos: se asigna por nombre, así que un producto BIC de AZETA y otro de Liderpapel comparten el mismo fabricante.</p>
+      <label class="ck"><input type="checkbox" name="APLICAR_RECARGO" {{ 'checked' if cfg.APLICAR_RECARGO not in ['0','','false','no'] }}> Aplicar recargo de equivalencia al coste real (AZETA)</label>
+    </div>
+
+    <div class="card">
+      <h2>Credenciales AZETA</h2>
+      <div class="row">
+        <div><label>Usuario</label><input type="text" name="AZETA_USER" value="{{ cfg.AZETA_USER }}"></div>
+        <div><label>Contraseña</label><input type="text" name="AZETA_PASSWORD" value="{{ cfg.AZETA_PASSWORD }}"></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Credenciales Liderpapel (CS Papelería)</h2>
+      <div class="row">
+        <div><label>Usuario B2B</label><input type="text" name="CS_USER" value="{{ cfg.CS_USER }}"></div>
+        <div><label>Contraseña</label><input type="text" name="CS_PASS" value="{{ cfg.CS_PASS }}"></div>
+      </div>
+      <div class="row" style="margin-top:6px">
+        <div><label>IVA por defecto (%) — el portal no lo publica</label><input type="text" name="CS_IVA_DEFAULT" value="{{ cfg.CS_IVA_DEFAULT }}" placeholder="21"></div>
+        <div><label>Perfil TLS curl_cffi</label><input type="text" name="CS_IMPERSONATE" value="{{ cfg.CS_IMPERSONATE }}" placeholder="chrome"></div>
+      </div>
+      <label class="ck"><input type="checkbox" name="CS_APLICAR_RECARGO" {{ 'checked' if cfg.CS_APLICAR_RECARGO not in ['0','','false','no'] }}> Aplicar recargo de equivalencia al coste real (Liderpapel)</label>
+    </div>
+
+    <button type="submit">Guardar configuración</button>
+  </form>
+
+  {% if ps_ok %}
+  <div class="card" style="margin-top:16px">
+    <h2>Probar conexión con PrestaShop</h2>
+    <form method="post" action="{{ request.script_root }}/probar">
+      <button type="submit" class="sec">Probar conexión (listar productos)</button>
+    </form>
+  </div>
+  {% endif %}
+</main>
+</body>
+</html>

@@ -1,0 +1,145 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Monitor unificado · AZETA + Liderpapel</title>
+<style>
+  :root{
+    --bg:#0f1216; --panel:#171b21; --panel2:#1e242c; --line:#2a323c;
+    --txt:#e7edf3; --muted:#9aa7b4; --accent:#4f8cff; --ok:#3ecf8e; --warn:#f4c542; --err:#ff6b6b;
+    --azeta:#4f8cff; --lider:#5aa832;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--txt);font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif}
+  header{display:flex;align-items:center;gap:14px;padding:16px 20px;border-bottom:1px solid var(--line);flex-wrap:wrap}
+  header h1{font-size:18px;margin:0}
+  header .sp{flex:1}
+  a.lnk,button.lnk{color:var(--muted);text-decoration:none;font-size:13px;border:1px solid var(--line);
+       padding:7px 11px;border-radius:9px;background:var(--panel2);cursor:pointer}
+  a.lnk:hover,button.lnk:hover{color:#fff;border-color:var(--accent)}
+  main{max-width:1100px;margin:0 auto;padding:20px}
+  .cards{display:flex;gap:12px;flex-wrap:wrap;margin-bottom:16px}
+  .stat{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:12px 16px;min-width:120px}
+  .stat b{font-size:22px;display:block}
+  .stat span{color:var(--muted);font-size:12px}
+  .bar{display:flex;gap:10px;flex-wrap:wrap;align-items:center;background:var(--panel);border:1px solid var(--line);
+       border-radius:12px;padding:12px;margin-bottom:14px}
+  .bar input,.bar select{padding:9px 10px;border-radius:9px;border:1px solid var(--line);background:var(--panel2);color:var(--txt);font-size:14px}
+  .bar button{padding:9px 14px;border:none;border-radius:9px;background:var(--accent);color:#fff;font-weight:600;cursor:pointer}
+  .bar .sec{background:var(--panel2);color:var(--txt);border:1px solid var(--line)}
+  .bar form{display:inline-flex;gap:8px;align-items:center;margin:0}
+  label.ck{display:inline-flex;gap:5px;align-items:center;color:var(--muted);font-size:14px}
+  .flash{padding:10px 13px;border-radius:9px;margin-bottom:12px;font-size:14px}
+  .flash.ok{background:rgba(62,207,142,.12);color:var(--ok)} .flash.warn{background:rgba(244,197,66,.14);color:var(--warn)}
+  .flash.error{background:rgba(255,107,107,.12);color:var(--err)}
+  table{width:100%;border-collapse:collapse;background:var(--panel);border:1px solid var(--line);border-radius:12px;overflow:hidden}
+  th,td{text-align:left;padding:9px 11px;border-bottom:1px solid var(--line);font-size:13.5px}
+  th{color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:.04em}
+  tr:last-child td{border-bottom:none}
+  .tag{font-size:11px;font-weight:700;padding:2px 8px;border-radius:20px}
+  .tag.AZETA{background:rgba(79,140,255,.16);color:var(--azeta)}
+  .tag.Liderpapel{background:rgba(90,168,50,.18);color:#8fd15a}
+  .est{font-size:12px;font-weight:600;padding:2px 8px;border-radius:20px}
+  .est.disponible{background:rgba(62,207,142,.14);color:var(--ok)}
+  .est.agotado{background:rgba(244,197,66,.14);color:var(--warn)}
+  .est.desaparecido{background:rgba(255,107,107,.14);color:var(--err)}
+  .est.desconocido,.est{background:var(--panel2);color:var(--muted)}
+  .muted{color:var(--muted)} .right{text-align:right}
+  .icon{background:none;border:none;color:var(--muted);cursor:pointer;font-size:13px;text-decoration:underline}
+  .vacio{color:var(--muted);text-align:center;padding:36px}
+  .warnbox{background:rgba(244,197,66,.12);color:var(--warn);border-radius:10px;padding:12px 14px;margin-bottom:14px;font-size:14px}
+</style>
+</head>
+<body>
+<header>
+  <a class="lnk" href="/">☰ Menú</a>
+  <h1>Monitor unificado</h1>
+  <span class="sp"></span>
+  <form method="post" action="{{ request.script_root }}/comprobar" style="margin:0">
+    {% if filtro_proveedor %}<input type="hidden" name="proveedor" value="{{ filtro_proveedor }}">{% endif %}
+    <button class="lnk" type="submit">↻ Comprobar {{ 'filtrados' if filtro_proveedor else 'todos' }}</button>
+  </form>
+  {% if ps_ok %}
+  <form method="post" action="{{ request.script_root }}/sincronizar" style="margin:0">
+    <button class="lnk" type="submit">⇩ Sincronizar PrestaShop</button>
+  </form>
+  {% endif %}
+</header>
+<main>
+  {% if not supabase_ok %}
+    <div class="warnbox">Supabase no está configurado (faltan SUPABASE_URL / SUPABASE_KEY). El monitor no puede guardar ni leer datos.</div>
+  {% endif %}
+
+  {% with messages = get_flashed_messages(with_categories=true) %}
+    {% for cat, msg in messages %}<div class="flash {{cat}}">{{ msg }}</div>{% endfor %}
+  {% endwith %}
+
+  <div class="cards">
+    <div class="stat"><b>{{ resumen.total }}</b><span>vigilados activos</span></div>
+    <div class="stat"><b>{{ resumen.por_proveedor.get('AZETA', 0) }}</b><span>AZETA</span></div>
+    <div class="stat"><b>{{ resumen.por_proveedor.get('Liderpapel', 0) }}</b><span>Liderpapel</span></div>
+    <div class="stat"><b>{{ resumen.incidencias }}</b><span>incidencias</span></div>
+  </div>
+
+  <div class="bar">
+    <form method="post" action="{{ request.script_root }}/add">
+      <input type="text" name="ean" inputmode="numeric" placeholder="EAN a vigilar" style="min-width:180px">
+      <label class="ck"><input type="checkbox" name="proveedores" value="AZETA" checked> AZETA</label>
+      <label class="ck"><input type="checkbox" name="proveedores" value="Liderpapel" checked> Liderpapel</label>
+      <button type="submit">Añadir</button>
+    </form>
+  </div>
+
+  <form method="get" class="bar" style="justify-content:flex-start">
+    <span class="muted">Filtrar:</span>
+    <select name="proveedor" onchange="this.form.submit()">
+      <option value="">Todos los proveedores</option>
+      <option value="AZETA" {{ 'selected' if filtro_proveedor=='AZETA' }}>AZETA</option>
+      <option value="Liderpapel" {{ 'selected' if filtro_proveedor=='Liderpapel' }}>Liderpapel</option>
+    </select>
+    <select name="estado" onchange="this.form.submit()">
+      <option value="">Todos los estados</option>
+      <option value="disponible" {{ 'selected' if filtro_estado=='disponible' }}>Disponible</option>
+      <option value="agotado" {{ 'selected' if filtro_estado=='agotado' }}>Agotado</option>
+      <option value="desaparecido" {{ 'selected' if filtro_estado=='desaparecido' }}>Desaparecido</option>
+    </select>
+    {% if filtro_proveedor or filtro_estado %}<a class="lnk" href="{{ request.script_root }}/">Limpiar</a>{% endif %}
+  </form>
+
+  {% if vigilados %}
+  <table>
+    <thead><tr>
+      <th>Proveedor</th><th>EAN</th><th>Nombre</th><th>Estado</th>
+      <th class="right">Stock</th><th class="right">Precio neto</th><th class="right">Coste real</th>
+      <th>Última revisión</th><th></th>
+    </tr></thead>
+    <tbody>
+    {% for v in vigilados %}
+      <tr>
+        <td><span class="tag {{ v.proveedor }}">{{ v.proveedor }}</span></td>
+        <td>{{ v.ean }}</td>
+        <td>{{ v.nombre or '—' }}</td>
+        <td><span class="est {{ v.estado or 'desconocido' }}">{{ v.estado or '—' }}</span></td>
+        <td class="right">{{ v.stock if v.stock is not none else '—' }}</td>
+        <td class="right">{{ '%.2f €'|format(v.precio_neto) if v.precio_neto is not none else '—' }}</td>
+        <td class="right">{{ '%.2f €'|format(v.coste_real) if v.coste_real is not none else '—' }}</td>
+        <td class="muted">{{ (v.ultima_revision or '')[:16].replace('T',' ') or '—' }}</td>
+        <td class="right">
+          <form method="post" action="{{ request.script_root }}/quitar" style="margin:0"
+                onsubmit="return confirm('¿Quitar {{ v.ean }} ({{ v.proveedor }}) del monitor?')">
+            <input type="hidden" name="ean" value="{{ v.ean }}">
+            <input type="hidden" name="proveedor" value="{{ v.proveedor }}">
+            <button class="icon" type="submit">quitar</button>
+          </form>
+        </td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+    <div class="vacio">No hay productos vigilados{{ ' con ese filtro' if (filtro_proveedor or filtro_estado) else '' }}. Añade un EAN arriba.</div>
+  {% endif %}
+</main>
+</body>
+</html>

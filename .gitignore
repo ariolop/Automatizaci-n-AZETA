@@ -24,3 +24,7 @@ env/
 # Sistema
 .DS_Store
 Thumbs.db
+
+migrar_monitor_a_supabase.py
+
+*.sql

@@ -105,7 +105,10 @@ def _ejecutar(jid, eans, vigilar):
                 "stock": f.get("stock"),
                 "imagen": (f.get("imagenes") or [None])[0]}
         if vigilar and f.get("encontrado"):
-            db.add_vigilado(ean, f.get("nombre"))
+            import monitor_comun
+            monitor_comun.añadir(ean, "Liderpapel", nombre=f.get("nombre"),
+                                 estado=estado, stock=f.get("stock"),
+                                 precio_neto=f.get("precio_neto"), coste_real=f.get("coste_real"))
         with _LOCK:
             job["items"].append(item)
             job["procesados"] += 1

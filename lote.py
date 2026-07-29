@@ -232,7 +232,8 @@ def _procesar(jid: str, eans: list[str], opciones: dict):
         else:
             job["resumen"]["disponibles"] += 1
             if vigilar and d.get("ean"):
-                db.añadir_vigilado(d["ean"], nombre=d.get("nombre"), origen="manual")
+                import monitor_comun
+                monitor_comun.añadir(d["ean"], "AZETA", nombre=d.get("nombre"), origen="manual")
 
             ya = existentes.get((d.get("ean") or "").strip())
             if ya:
@@ -247,8 +248,9 @@ def _procesar(jid: str, eans: list[str], opciones: dict):
                          disponible_pedido=res.get("disponible_para_pedido"))
                     job["resumen"]["subidos"] += 1
                     if d.get("ean"):
-                        db.añadir_vigilado(d["ean"], nombre=d.get("nombre"),
-                                           origen="prestashop", id_prestashop=res.get("id_product"))
+                        import monitor_comun
+                        monitor_comun.añadir(d["ean"], "AZETA", nombre=d.get("nombre"),
+                                             origen="prestashop", id_prestashop=res.get("id_product"))
                 except Exception as e:
                     _set(item, estado="error_subida", detalle=str(e))
                     job["resumen"]["errores"] += 1

@@ -56,7 +56,10 @@ sys.path.insert(0, str(ROOT))
 # Toda la lógica de búsqueda/normalización/comparación vive en busqueda_comun
 # (compartida con la página unificada /buscar), para no duplicarla.
 import busqueda_comun as bc                                    # noqa: E402
-from . import historial                                        # noqa: E402  registro en Supabase (opcional)
+try:
+    from . import historial                                    # como paquete (hub)
+except ImportError:                                            # ejecutado suelto
+    import historial                                           # noqa: E402  registro en Supabase (opcional)
 
 # --------------------------------------------------------------------------- #
 # Flask
@@ -159,7 +162,10 @@ def _ssl_context():
     if cert.exists() and key.exists():
         return (str(cert), str(key))
     try:
-        from . import gen_cert
+        try:
+            from . import gen_cert
+        except ImportError:
+            import gen_cert
         gen_cert.generar(cert, key)
         return (str(cert), str(key))
     except Exception as e:                       # noqa: BLE001

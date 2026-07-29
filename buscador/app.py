@@ -12,6 +12,7 @@ from __future__ import annotations
 from flask import Flask, jsonify, render_template, request
 
 import busqueda_comun as bc
+import monitor_comun as mon
 
 app = Flask(__name__)
 
@@ -68,3 +69,18 @@ def publicar():
     res = bc.publicar(proveedor, ean)
     codigo = 200 if res.get("ok") else 400
     return jsonify(res), codigo
+
+
+@app.route("/monitor", methods=["POST"])
+def add_monitor():
+    """Añade el producto al monitor unificado (proveedor según la ficha)."""
+    data = request.get_json(silent=True) or {}
+    proveedor = data.get("proveedor")
+    ean = (data.get("ean") or "").strip()
+    nombre = data.get("nombre")
+    if not ean or not proveedor:
+        return jsonify({"ok": False, "error": "Faltan 'proveedor' y/o 'ean'."}), 400
+    if not mon.activo():
+        return jsonify({"ok": False, "error": "El monitor (Supabase) no está configurado."}), 400
+    ok = mon.añadir(ean, proveedor, nombre=nombre, origen="manual")
+    return (jsonify({"ok": True}), 200) if ok else (jsonify({"ok": False, "error": "No se pudo guardar."}), 400)

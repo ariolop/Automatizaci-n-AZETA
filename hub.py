@@ -60,11 +60,15 @@ _cargar_env(ROOT / "scanner" / ".env")
 # Importar las tres apps (el orden no colisiona: AZETA plano, CS paquete).
 # --------------------------------------------------------------------------- #
 from buscador import app as buscador_mod         # noqa: E402  Búsqueda + publicar unificada
+from monitor_app import app as monitor_mod       # noqa: E402  Monitor unificado
+from configuracion import app as config_mod      # noqa: E402  Configuración central
 import app as azeta_mod                          # noqa: E402  AZETA (raíz)
 from cspapeleria import app as cs_mod            # noqa: E402  CS Papelería / Liderpapel
 from scanner import scanner_app as scanner_mod   # noqa: E402  Escáner
 
 buscador_app = buscador_mod.app
+monitor_app = monitor_mod.app
+config_app = config_mod.app
 azeta_app = azeta_mod.app
 cs_app = cs_mod.app
 scanner_app = scanner_mod.app
@@ -79,14 +83,20 @@ APPS = [
     {"slug": "buscar",  "url": "/buscar",  "nombre": "Buscar y publicar (unificado)",
      "desc": "Busca un EAN y compara AZETA y Liderpapel a la vez; publica en PrestaShop el que elijas.",
      "icon": "🔎", "destacado": True},
+    {"slug": "monitor", "url": "/monitor", "nombre": "Monitor unificado",
+     "desc": "Vigila disponibilidad y stock de AZETA y Liderpapel en una sola lista, con su etiqueta de proveedor.",
+     "icon": "📊"},
     {"slug": "escaner", "url": "/escaner", "nombre": "Escáner de código de barras",
      "desc": "Escanea un EAN con la cámara del móvil y compara AZETA vs Liderpapel al instante.",
      "icon": "📷"},
+    {"slug": "config",  "url": "/config",  "nombre": "Configuración",
+     "desc": "PrestaShop y credenciales de AZETA y Liderpapel, todo en un solo sitio.",
+     "icon": "⚙️"},
     {"slug": "azeta",   "url": "/azeta",   "nombre": "AZETA Manager",
-     "desc": "Herramienta completa de AZETA: lote, monitor de disponibilidad y configuración.",
+     "desc": "Herramienta específica de AZETA: búsqueda individual y carga por lotes.",
      "icon": "📦"},
     {"slug": "cs",      "url": "/cs",      "nombre": "CS Papelería / Liderpapel",
-     "desc": "Herramienta completa de Liderpapel: carga por lotes, monitor de stock y configuración.",
+     "desc": "Herramienta específica de Liderpapel: búsqueda individual y carga por lotes.",
      "icon": "🗂️"},
 ]
 
@@ -106,6 +116,8 @@ def salud():
 # --------------------------------------------------------------------------- #
 _mounted = DispatcherMiddleware(hub, {
     "/buscar": buscador_app,
+    "/monitor": monitor_app,
+    "/config": config_app,
     "/azeta": azeta_app,
     "/cs": cs_app,
     "/escaner": scanner_app,

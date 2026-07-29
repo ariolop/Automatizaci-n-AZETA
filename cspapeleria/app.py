@@ -87,8 +87,8 @@ def lote_csv(jid):
 
 @app.route("/monitor")
 def monitor_ver():
-    db.init_db()
-    return render_template("monitor.html", vigilados=db.listar_vigilados())
+    # El monitor ahora es unificado (AZETA + Liderpapel) a nivel de hub.
+    return redirect("/monitor")
 
 
 @app.route("/monitor/add", methods=["POST"])
@@ -118,12 +118,8 @@ def monitor_run():
 
 @app.route("/config", methods=["GET", "POST"])
 def config_ver():
-    if request.method == "POST":
-        config.guardar_config({k: request.form.get(k) for k in config.CLAVES})
-        _sesion["ses"] = None  # forzar re-login con nuevas credenciales
-        flash("Configuración guardada.", "ok")
-        return redirect(url_for("config_ver"))
-    return render_template("config.html", cfg=config.leer_config())
+    # La configuración ahora es central a nivel de hub.
+    return redirect("/config")
 
 
 if __name__ == "__main__":

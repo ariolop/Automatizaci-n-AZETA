@@ -58,8 +58,8 @@
       <a href="/">☰ Menú</a>
       <a href="{{ url_for('buscar') }}" class="{{ 'active' if request.endpoint=='buscar' else '' }}">Buscar / Publicar</a>
       <a href="{{ url_for('lote') }}" class="{{ 'active' if request.endpoint=='lote' else '' }}">Lote</a>
-      <a href="{{ url_for('monitor') }}" class="{{ 'active' if request.endpoint=='monitor' else '' }}">Monitor</a>
-      <a href="{{ url_for('configuracion') }}" class="{{ 'active' if request.endpoint=='configuracion' else '' }}">Configuración</a>
+      <a href="/monitor">Monitor</a>
+      <a href="/config">Configuración</a>
     </nav>
   </header>
 

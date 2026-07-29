@@ -25,6 +25,7 @@ from flask import (Flask, render_template, request, redirect, url_for, flash,
 
 import config
 import db
+import monitor_comun          # monitor unificado (Supabase); las altas van aquí
 from azeta_login import AzetaError
 from azeta_producto import buscar_producto
 
@@ -68,10 +69,10 @@ def buscar():
         if not datos["encontrado"]:
             flash(f"No se encontró ningún producto para «{patron}».", "error")
         else:
-            # Añadir a vigilados si se pidió
+            # Añadir a vigilados si se pidió (monitor unificado, proveedor AZETA)
             if vigilar and datos.get("ean"):
-                db.añadir_vigilado(datos["ean"], nombre=datos.get("nombre"), origen="manual")
-                flash("Añadido al monitor de disponibilidad.", "ok")
+                monitor_comun.añadir(datos["ean"], "AZETA", nombre=datos.get("nombre"), origen="manual")
+                flash("Añadido al monitor unificado.", "ok")
 
             # Subir a PrestaShop si se pidió
             if subir:
@@ -87,8 +88,8 @@ def buscar():
                             "ok",
                         )
                         if datos.get("ean"):
-                            db.añadir_vigilado(
-                                datos["ean"], nombre=datos.get("nombre"),
+                            monitor_comun.añadir(
+                                datos["ean"], "AZETA", nombre=datos.get("nombre"),
                                 origen="prestashop", id_prestashop=res.get("id_product"),
                             )
                     except Exception as e:
@@ -113,12 +114,8 @@ def buscar():
 # --------------------------------------------------------------------------- #
 @app.route("/monitor")
 def monitor():
-    return render_template(
-        "monitor.html",
-        vigilados=db.listar_vigilados(),
-        resumen=db.resumen(),
-        ps_ok=prestashop_configurado(),
-    )
+    # El monitor ahora es unificado (AZETA + Liderpapel) a nivel de hub.
+    return redirect("/monitor")
 
 
 @app.route("/monitor/comprobar", methods=["POST"])
@@ -227,48 +224,8 @@ def descargar():
 # --------------------------------------------------------------------------- #
 @app.route("/config", methods=["GET", "POST"])
 def configuracion():
-    if request.method == "POST":
-        cambios = {
-            "AZETA_USER": (request.form.get("AZETA_USER") or "").strip(),
-            "AZETA_PASSWORD": (request.form.get("AZETA_PASSWORD") or "").strip(),
-            "PRESTASHOP_URL": (request.form.get("PRESTASHOP_URL") or "").strip().rstrip("/"),
-            "PRESTASHOP_TOKEN": (request.form.get("PRESTASHOP_TOKEN") or "").strip(),
-            "PRESTASHOP_CATEGORIA_DEFECTO": (request.form.get("PRESTASHOP_CATEGORIA_DEFECTO") or "2").strip(),
-            "PRESTASHOP_PROVEEDOR": (request.form.get("PRESTASHOP_PROVEEDOR") or "").strip(),
-            "PRESTASHOP_PROVEEDOR_CS": (request.form.get("PRESTASHOP_PROVEEDOR_CS") or "").strip(),
-            "PRESTASHOP_IMPUESTOS": (request.form.get("PRESTASHOP_IMPUESTOS") or "").strip(),
-            "APLICAR_RECARGO": "1" if request.form.get("APLICAR_RECARGO") == "on" else "0",
-        }
-        config.guardar_config(cambios)
-        flash("Configuración guardada y aplicada.", "ok")
-        return redirect(url_for("configuracion"))
-
-    # Cargar proveedores e impuestos desde PrestaShop (si está configurado)
-    proveedores, impuestos, aviso_ps = [], [], None
-    if prestashop_configurado():
-        try:
-            from prestashop_client import PrestashopClient
-            opciones = PrestashopClient().obtener_opciones()
-            proveedores = opciones.get("proveedores", [])
-            impuestos = opciones.get("impuestos", [])
-        except Exception as e:
-            aviso_ps = str(e)
-
-    return render_template("config.html", cfg=config.leer_config(),
-                           ps_ok=prestashop_configurado(),
-                           proveedores=proveedores, impuestos=impuestos,
-                           aviso_ps=aviso_ps)
-
-
-@app.route("/config/probar-ps", methods=["POST"])
-def config_probar_ps():
-    try:
-        from prestashop_client import PrestashopClient
-        productos = PrestashopClient().listar_productos()
-        flash(f"Conexión correcta. PrestaShop devolvió {len(productos)} productos.", "ok")
-    except Exception as e:
-        flash(f"Error de conexión: {e}", "error")
-    return redirect(url_for("configuracion"))
+    # La configuración ahora es central a nivel de hub.
+    return redirect("/config")
 
 
 # --------------------------------------------------------------------------- #

@@ -138,15 +138,17 @@ function render(d){
     if(p.disponible!=null) kv.push(["Disponible", p.disponible?"Sí":"No"]);
     for(const [k,v] of Object.entries(p.extra||{})){ if(v!=null&&v!=='') kv.push([k, esc(v)]); }
 
+    const provSlug = cls==='azeta' ? 'azeta' : 'cs';
     let pubBloque = "";
     if(PS_OK){
       if(existe){
         pubBloque = `<div class="msg info">Ya existe en PrestaShop · ID ${esc(existe.id||existe.id_product||'?')} · ${existe.activo? 'activo':'desactivado'}</div>`;
       }else{
-        const prov = cls==='azeta' ? 'azeta' : 'cs';
-        pubBloque = `<button class="pub" onclick="publicar(this,'${prov}','${esc(p.ean)}')">Publicar en PrestaShop</button>`;
+        pubBloque = `<button class="pub" onclick="publicar(this,'${provSlug}','${esc(p.ean)}')">Publicar en PrestaShop</button>`;
       }
     }
+    const nombreAttr = esc(p.nombre||"");
+    const vigilarBtn = `<button class="pub" style="margin-top:8px" onclick="monitorizar(this,'${provSlug}','${esc(p.ean)}','${nombreAttr}')">👁 Vigilar en el monitor</button>`;
     return `<div class="card ${cls}">
       <h2>${tag} ${esBarato?'<span class="barato">★ más barato</span>':''}</h2>
       ${img}
@@ -155,6 +157,8 @@ function render(d){
       <div class="kv">${kv.map(([k,v])=>`<div class="k">${k}</div><div>${v}</div>`).join("")}</div>
       <div class="pubmsg"></div>
       ${pubBloque}
+      <div class="monmsg"></div>
+      ${vigilarBtn}
     </div>`;
   }).join("");
 }
@@ -177,6 +181,18 @@ async function publicar(btnEl, proveedor, ean){
     msg.innerHTML=`<div class="msg err">Error de red: ${esc(e.message)}</div>`;
     btnEl.disabled=false;
   }
+}
+
+async function monitorizar(btnEl, proveedor, ean, nombre){
+  btnEl.disabled=true; const msg=btnEl.parentElement.querySelector(".monmsg");
+  msg.innerHTML='<div class="msg info"><span class="spin"></span> Añadiendo al monitor…</div>';
+  try{
+    const r=await fetch(`${BASE}/monitor`,{method:"POST",headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({proveedor,ean,nombre})});
+    const d=await r.json();
+    if(d.ok){ msg.innerHTML=`<div class="msg ok">Añadido al monitor.</div>`; btnEl.remove(); }
+    else{ msg.innerHTML=`<div class="msg err">${esc(d.error||'Error')}</div>`; btnEl.disabled=false; }
+  }catch(e){ msg.innerHTML=`<div class="msg err">Error de red: ${esc(e.message)}</div>`; btnEl.disabled=false; }
 }
 
 btn.addEventListener("click", buscar);
