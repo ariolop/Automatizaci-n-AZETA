@@ -88,6 +88,15 @@ class PrestashopClient:
             raise PrestashopError(f"No se pudo conectar con PrestaShop: {e}")
         return self._parse(r)
 
+    def obtener_ficha(self, ean, timeout: int = 40) -> dict:
+        """Ficha resumida de un producto por EAN (nombre, precio, imagen, activo)."""
+        try:
+            r = requests.post(self._endpoint("ficha"),
+                              json={"token": self.token, "ean": str(ean)}, timeout=timeout)
+        except requests.RequestException as e:
+            raise PrestashopError(f"No se pudo conectar con PrestaShop: {e}")
+        return self._parse(r)
+
     def listar_productos(self, timeout: int = 40) -> list[dict]:
         try:
             r = requests.post(self._endpoint("listado"), json={"token": self.token}, timeout=timeout)

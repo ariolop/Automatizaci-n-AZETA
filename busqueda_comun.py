@@ -189,6 +189,18 @@ def prestashop_configurado() -> bool:
     return config.prestashop_configurado()
 
 
+def ficha_prestashop(ean: str) -> dict | None:
+    """Cómo está el producto en PrestaShop (nombre, precio, imagen, activo) o None."""
+    if not ean or not prestashop_configurado():
+        return None
+    try:
+        from prestashop_client import PrestashopClient
+        d = PrestashopClient().obtener_ficha(ean)
+        return d if d and d.get("encontrado") else None
+    except Exception:  # noqa: BLE001
+        return None
+
+
 def ya_en_prestashop(ean: str) -> dict | None:
     """Devuelve {id, activo, nombre} si el EAN ya existe en la tienda; None si no
     existe o si PrestaShop no responde/está sin configurar."""

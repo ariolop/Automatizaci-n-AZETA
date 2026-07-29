@@ -113,25 +113,28 @@
     <thead><tr>
       <th>Proveedor</th><th>EAN</th><th>Nombre</th><th>Estado</th>
       <th class="right">Stock</th><th class="right">Precio neto</th><th class="right">Coste real</th>
+      <th style="text-align:center">PrestaShop</th>
       <th>Última revisión</th><th></th>
     </tr></thead>
     <tbody>
     {% for v in vigilados %}
-      <tr>
+      <tr data-ean="{{ v.ean }}" data-prov="{{ v.proveedor }}">
         <td><span class="tag {{ v.proveedor }}">{{ v.proveedor }}</span></td>
         <td>{{ v.ean }}</td>
         <td>{{ v.nombre or '—' }}</td>
-        <td><span class="est {{ v.estado or 'desconocido' }}">{{ v.estado or '—' }}</span></td>
-        <td class="right">{{ v.get('stock') if v.get('stock') is not none else '—' }}</td>
-        <td class="right">{{ '%.2f €'|format(v.get('precio_neto')) if v.get('precio_neto') is not none else '—' }}</td>
-        <td class="right">{{ '%.2f €'|format(v.get('coste_real')) if v.get('coste_real') is not none else '—' }}</td>
-        <td class="muted">{{ (v.ultima_revision or '')[:16].replace('T',' ') or '—' }}</td>
+        <td class="c-estado"><span class="est {{ v.estado or 'desconocido' }}">{{ v.estado or '—' }}</span></td>
+        <td class="right c-stock">{{ v.get('stock') if v.get('stock') is not none else '—' }}</td>
+        <td class="right c-precio">{{ '%.2f €'|format(v.get('precio_neto')) if v.get('precio_neto') is not none else '—' }}</td>
+        <td class="right c-coste">{{ '%.2f €'|format(v.get('coste_real')) if v.get('coste_real') is not none else '—' }}</td>
+        <td class="c-ps" style="text-align:center">
+          {% if en_ps is none %}<span class="muted" title="PrestaShop no disponible">—</span>
+          {% elif v.ean in en_ps %}<span style="color:var(--ok);font-weight:700" title="En PrestaShop">✓</span>
+          {% else %}<span style="color:var(--err);font-weight:700" title="No está en PrestaShop">✗</span>{% endif %}
+        </td>
+        <td class="muted c-rev">{{ (v.ultima_revision or '')[:16].replace('T',' ') or '—' }}</td>
         <td class="right" style="white-space:nowrap">
           <a class="icon" href="{{ request.script_root }}/editar?ean={{ v.ean }}&proveedor={{ v.proveedor }}" title="Editar">editar</a>
-          <form method="post" action="{{ request.script_root }}/comprobar-uno" style="display:inline;margin:0">
-            <input type="hidden" name="ean" value="{{ v.ean }}"><input type="hidden" name="proveedor" value="{{ v.proveedor }}">
-            <button class="icon" type="submit" title="Comprobar ahora">↻</button>
-          </form>
+          <button class="icon btn-check" type="button" title="Comprobar ahora" onclick="comprobar(this)">↻</button>
           <form method="post" action="{{ request.script_root }}/cambiar-proveedor" style="display:inline;margin:0"
                 onsubmit="return confirm('¿Reasignar {{ v.ean }} a {{ 'Liderpapel' if v.proveedor=='AZETA' else 'AZETA' }}?')">
             <input type="hidden" name="ean" value="{{ v.ean }}"><input type="hidden" name="proveedor" value="{{ v.proveedor }}">
@@ -160,5 +163,31 @@
     <div class="vacio">No hay productos vigilados{{ ' con ese filtro' if (filtro_proveedor or filtro_estado) else '' }}. Añade un EAN arriba.</div>
   {% endif %}
 </main>
+<script>
+const BASE = "{{ request.script_root }}";
+const fmtEur = n => (n===null||n===undefined) ? '—'
+  : Number(n).toLocaleString('es-ES',{minimumFractionDigits:2,maximumFractionDigits:2})+' €';
+
+async function comprobar(btn){
+  const tr = btn.closest('tr'); const ean = tr.dataset.ean, prov = tr.dataset.prov;
+  btn.disabled = true; btn.innerHTML = '<span class="spin"></span>';
+  try{
+    const r = await fetch(`${BASE}/comprobar-uno`, {method:'POST',
+      headers:{'Content-Type':'application/json'}, body:JSON.stringify({ean, proveedor:prov})});
+    const d = await r.json();
+    if(d.ok){
+      tr.querySelector('.c-estado').innerHTML = `<span class="est ${d.estado||'desconocido'}">${d.estado||'—'}</span>`;
+      tr.querySelector('.c-stock').textContent  = (d.stock===null||d.stock===undefined) ? '—' : d.stock;
+      tr.querySelector('.c-precio').textContent = fmtEur(d.precio_neto);
+      tr.querySelector('.c-coste').textContent  = fmtEur(d.coste_real);
+      tr.querySelector('.c-rev').textContent    = (d.ultima_revision||'').slice(0,16).replace('T',' ') || 'ahora';
+      btn.style.color = 'var(--ok)';
+    }else{
+      btn.style.color = 'var(--err)'; btn.title = d.error || 'Error';
+    }
+  }catch(e){ btn.style.color = 'var(--err)'; btn.title = e.message; }
+  finally{ btn.disabled = false; btn.textContent = '↻'; }
+}
+</script>
 </body>
 </html>

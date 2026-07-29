@@ -29,6 +29,17 @@ def index():
         pagina = 1
     datos = mon.listar_pagina(proveedor=proveedor, estado=estado, buscar=buscar,
                               pagina=pagina, por_pagina=POR_PAGINA)
+
+    # ¿Cuáles de esta página existen en PrestaShop? (una sola consulta por página)
+    en_ps = None
+    if bc.prestashop_configurado() and datos["filas"]:
+        try:
+            from prestashop_client import PrestashopClient
+            eans = [f["ean"] for f in datos["filas"] if f.get("ean")]
+            en_ps = set((PrestashopClient().comprobar_eans(eans) or {}).keys())
+        except Exception:  # noqa: BLE001  (PrestaShop caído/mantenimiento: columna neutra)
+            en_ps = None
+
     return render_template(
         "monitor.html",
         vigilados=datos["filas"],
@@ -39,23 +50,28 @@ def index():
         q=buscar or "",
         supabase_ok=mon.activo(),
         ps_ok=bc.prestashop_configurado(),
+        en_ps=en_ps,
     )
 
 
 @app.route("/comprobar-uno", methods=["POST"])
 def comprobar_uno():
-    ean = (request.form.get("ean") or "").strip()
-    proveedor = request.form.get("proveedor") or ""
-    if ean and proveedor:
-        try:
-            r = mon.comprobar_uno(ean, proveedor)
-            if r.get("error"):
-                flash(f"«{ean}» ({proveedor}): {r['error']}", "error")
-            else:
-                flash(f"«{ean}» ({proveedor}) → {r.get('estado')}.", "ok")
-        except Exception as e:  # noqa: BLE001
-            flash(f"Error al comprobar: {e}", "error")
-    return redirect(request.referrer or url_for("index"))
+    """Recomprueba una fila en segundo plano y devuelve el nuevo estado (JSON)."""
+    data = request.get_json(silent=True) or {}
+    ean = (data.get("ean") or request.form.get("ean") or "").strip()
+    proveedor = data.get("proveedor") or request.form.get("proveedor") or ""
+    if not ean or not proveedor:
+        return jsonify({"ok": False, "error": "Faltan datos."}), 400
+    try:
+        r = mon.comprobar_uno(ean, proveedor)
+        if r.get("error"):
+            return jsonify({"ok": False, "error": r["error"]})
+        from datetime import datetime, timezone
+        return jsonify({"ok": True, "estado": r.get("estado"), "stock": r.get("stock"),
+                        "precio_neto": r.get("precio_neto"), "coste_real": r.get("coste_real"),
+                        "ultima_revision": datetime.now(timezone.utc).isoformat()})
+    except Exception as e:  # noqa: BLE001
+        return jsonify({"ok": False, "error": str(e)})
 
 
 @app.route("/cambiar-proveedor", methods=["POST"])

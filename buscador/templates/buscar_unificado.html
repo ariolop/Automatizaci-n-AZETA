@@ -60,6 +60,14 @@
   .pub:disabled{opacity:.5;cursor:default}
   .vacio{color:var(--muted);text-align:center;padding:30px 10px}
   .foot{color:var(--muted);font-size:12px;margin-top:22px;text-align:center}
+  .psbox{display:flex;gap:14px;align-items:center;background:linear-gradient(180deg,rgba(90,168,50,.08),var(--panel));
+         border:1px solid var(--line);border-left:3px solid var(--lider);border-radius:14px;padding:14px;margin-bottom:16px}
+  .psbox img{width:64px;height:64px;object-fit:contain;background:#fff;border-radius:8px;border:1px solid var(--line)}
+  .psbox .pslabel{font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.04em}
+  .psbox .psname{font-size:15px;font-weight:600;margin:2px 0}
+  .psbox .psprice{font-size:14px}
+  .psbox .tag{font-size:11px;font-weight:700;padding:1px 7px;border-radius:20px}
+  .psbox .tag.si{background:rgba(62,207,142,.14);color:var(--ok)} .psbox .tag.no{background:var(--panel2);color:var(--muted)}
 </style>
 </head>
 <body>
@@ -87,6 +95,7 @@
   </div>
 
   <div id="status"></div>
+  <div id="psbox" style="display:none"></div>
   <div id="cards" class="cards"></div>
   <div id="vacio" class="vacio">Introduce un EAN para comparar ambos proveedores.</div>
 
@@ -122,6 +131,19 @@ async function buscar(){
 
 function render(d){
   const c=d.comparacion||{}; const ya=d.ya_prestashop||{};
+
+  // Cómo está en tu PrestaShop
+  const ps=d.ps, psbox=$("#psbox");
+  if(ps){
+    psbox.innerHTML=`<div class="psbox">
+      ${ps.imagen?`<img src="${esc(ps.imagen)}" onerror="this.style.display='none'">`:''}
+      <div>
+        <div class="pslabel">En tu PrestaShop · ${ps.activo?'<span class="tag si">activo</span>':'<span class="tag no">desactivado</span>'}</div>
+        <div class="psname">${esc(ps.nombre||'(sin nombre)')}</div>
+        <div class="psprice">${fmt(ps.precio)} <span class="muted" style="font-size:12px">con IVA</span> · ${fmt(ps.precio_sin_iva)} <span class="muted" style="font-size:12px">sin IVA</span></div>
+      </div></div>`;
+    psbox.style.display="block";
+  }else{ psbox.style.display="none"; psbox.innerHTML=""; }
   const lados=[["azeta",d.azeta],["lider",d.cs]].filter(x=>x[1]);
   statusEl.innerHTML = d.encontrado
     ? (c.mas_barato && c.mas_barato!=='empate' && c.diferencia!=null

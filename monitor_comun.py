@@ -308,16 +308,17 @@ def _comprobar_uno(v: dict) -> dict:
         return {"ean": ean, "proveedor": prov, "error": norm.get("error")}
 
     estado = _estado_desde_ficha(norm)
-    actualizar_estado(ean, prov, estado,
-                      nombre=norm.get("nombre") or v.get("nombre"),
+    nombre = norm.get("nombre") or v.get("nombre")
+    actualizar_estado(ean, prov, estado, nombre=nombre,
                       stock=norm.get("stock"),
                       precio_neto=norm.get("precio_neto"),
                       coste_real=norm.get("coste_real"))
     incidencia = None
     if estado != "disponible" and estado_previo != estado:
-        incidencia = {"ean": ean, "proveedor": prov, "estado": estado,
-                      "nombre": norm.get("nombre") or v.get("nombre")}
-    return {"ean": ean, "proveedor": prov, "estado": estado, "incidencia": incidencia}
+        incidencia = {"ean": ean, "proveedor": prov, "estado": estado, "nombre": nombre}
+    return {"ean": ean, "proveedor": prov, "estado": estado, "nombre": nombre,
+            "stock": norm.get("stock"), "precio_neto": norm.get("precio_neto"),
+            "coste_real": norm.get("coste_real"), "incidencia": incidencia}
 
 
 def comprobar_uno(ean: str, proveedor: str) -> dict:

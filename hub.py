@@ -98,12 +98,8 @@ APPS = [
     {"slug": "config",  "url": "/config",  "nombre": "Configuración",
      "desc": "PrestaShop y credenciales de AZETA y Liderpapel, todo en un solo sitio.",
      "icon": "⚙️"},
-    {"slug": "azeta",   "url": "/azeta",   "nombre": "AZETA Manager",
-     "desc": "Herramienta específica de AZETA: búsqueda individual y carga por lotes.",
-     "icon": "📦"},
-    {"slug": "cs",      "url": "/cs",      "nombre": "CS Papelería / Liderpapel",
-     "desc": "Herramienta específica de Liderpapel: búsqueda individual y carga por lotes.",
-     "icon": "🗂️"},
+    # AZETA Manager (/azeta) y CS Papelería (/cs) siguen montadas (para las
+    # redirecciones y la búsqueda individual) pero se ocultan del menú.
 ]
 
 

@@ -8,6 +8,7 @@
  *   - controller=comprobar  : comprueba qué EANs ya existen.
  *   - controller=opciones   : proveedores e impuestos disponibles.
  *   - controller=actualizar : actualiza EAN13/nombre de un producto (sincronización).
+ *   - controller=ficha      : ficha resumida por EAN (nombre, precio, imagen, activo).
  *
  * Compatibilidad: PrestaShop 8.0 – 9.x (PHP 8.1+).
  */
@@ -22,7 +23,7 @@ class Aplproveedoresconector extends Module
     {
         $this->name = 'aplproveedoresconector';
         $this->tab = 'administration';
-        $this->version = '1.0.0';
+        $this->version = '1.1.0';
         $this->author = 'Clearis';
         $this->need_instance = 0;
         $this->ps_versions_compliancy = ['min' => '8.0.0', 'max' => '9.99.99'];

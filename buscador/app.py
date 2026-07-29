@@ -48,6 +48,7 @@ def api_buscar():
             ya[lado["ean"]] = bc.ya_en_prestashop(lado["ean"])
     res["ok"] = True
     res["ya_prestashop"] = ya
+    res["ps"] = bc.ficha_prestashop(ean)   # cómo está en PrestaShop (nombre/precio/imagen)
     res["ps_ok"] = bc.prestashop_configurado()
     return jsonify(res)
 
