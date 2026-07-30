@@ -35,6 +35,14 @@
   .warn{background:rgba(244,197,66,.12);color:var(--warn);border-radius:9px;padding:10px 12px;font-size:13px;margin-bottom:12px}
   .tags .tag{display:inline-block;font-size:11px;background:var(--panel2);border:1px solid var(--line);border-radius:20px;padding:2px 8px;margin:2px}
   #chartWrap{display:none;background:var(--panel2);border:1px solid var(--line);border-radius:12px;padding:14px;margin-top:12px}
+  .outlier{border:1px solid var(--warn);background:rgba(244,197,66,.06);border-radius:12px;padding:12px;margin:10px 0}
+  .outlier .ohead{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:4px}
+  .badge{font-size:11px;color:var(--warn);border:1px solid var(--line);border-radius:20px;padding:2px 8px}
+  .orow{display:flex;gap:14px;flex-wrap:wrap;align-items:flex-start;margin-top:8px}
+  img.cap{max-width:440px;width:100%;border:1px solid var(--line);border-radius:8px;display:block}
+  .oact{display:flex;flex-direction:column;gap:8px}
+  button.save{background:var(--ok);color:#063}
+  tr.out td{background:rgba(244,197,66,.12)}
 </style>
 </head>
 <body>
@@ -72,6 +80,7 @@
       <div id="progTxt" class="muted">Procesando…</div>
       <div class="barra"><div id="prog"></div></div>
     </div>
+    <div id="outliersLive"></div>
     <div class="row" style="margin-top:14px;border-top:1px solid var(--line);padding-top:14px">
       <span class="muted">Consulta rápida:</span>
       <input type="text" id="ean1" inputmode="numeric" placeholder="Un EAN" style="width:200px">
@@ -93,6 +102,7 @@
       </select>
     </div>
     <div id="tablaRun" style="margin-top:12px;overflow:auto"></div>
+    <div id="outliersRun"></div>
     <div id="chartWrap"><canvas id="chart" height="120"></canvas></div>
   </div>
 </main>
@@ -103,6 +113,47 @@ const BASE="{{ request.script_root }}";
 const $=s=>document.querySelector(s);
 const esc=s=>(s??"").toString().replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
 const eur=n=>(n===null||n===undefined||n==="")?"—":Number(n).toLocaleString("es-ES",{minimumFractionDigits:2,maximumFractionDigits:2})+" €";
+
+// ---- Outliers (precios sospechosos): tarjeta con captura + botón Guardar ----
+function tarjetaOutlier(o){
+  const capUrl = o.captura ? `${BASE}/captura/${encodeURIComponent(o.run_id)}/${encodeURIComponent(o.captura)}` : null;
+  const img = capUrl
+    ? `<a href="${capUrl}" target="_blank" rel="noopener"><img class="cap" src="${capUrl}" alt="captura ${esc(o.tienda)}"></a>`
+    : `<div class="muted">Sin captura (instala Playwright en local para verla).</div>`;
+  const g = o.guardado;
+  return `<div class="outlier">
+    <div class="ohead"><b>${esc(o.tienda)}</b><span class="muted">· EAN ${esc(o.ean)}</span>
+      <span class="badge">precio ${eur(o.precio)} · mediana ${eur(o.mediana)}</span></div>
+    <div class="muted">${esc(o.nombre||'')}${o.pvp!=null?` · tu PVP ${eur(o.pvp)}`:''}</div>
+    <div class="orow">${img}
+      <div class="oact">
+        <a class="lnk" href="${esc(o.url)}" target="_blank" rel="noopener">Abrir página ↗</a>
+        <button class="save" ${g?'disabled':''}
+          data-run="${esc(o.run_id)}" data-ean="${esc(o.ean)}" data-tienda="${esc(o.tienda)}"
+          data-precio="${o.precio??''}" data-nombre="${esc(o.nombre||'')}" data-url="${esc(o.url||'')}"
+          data-pvp="${o.pvp??''}" data-nombreps="${esc(o.nombre_ps||'')}">
+          ${g?'Guardado ✓':'Guardar de todas formas'}</button>
+      </div></div></div>`;
+}
+async function guardarOutlier(btn){
+  const p=btn.dataset;
+  btn.disabled=true; btn.textContent="Guardando…";
+  const body={run_id:p.run, ean:p.ean, tienda:p.tienda, nombre:p.nombre, url:p.url,
+    precio:p.precio===""?null:Number(p.precio), pvp:p.pvp===""?null:Number(p.pvp), nombre_ps:p.nombreps};
+  try{
+    const r=await fetch(`${BASE}/guardar_outlier`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});
+    const d=await r.json();
+    if(d.ok){ btn.textContent="Guardado ✓"; }
+    else{ alert(d.error||"Error"); btn.disabled=false; btn.textContent="Guardar de todas formas"; }
+  }catch(e){ alert("Error de red: "+e.message); btn.disabled=false; btn.textContent="Guardar de todas formas"; }
+}
+function renderOutliers(el, list){
+  if(!el) return;
+  if(!list||!list.length){ el.innerHTML=""; return; }
+  el.innerHTML=`<div class="warn">🚩 ${list.length} precio(s) sospechoso(s) fuera de ±3 € de la mediana. No se han subido; revisa la captura y, si es correcto, pulsa «Guardar de todas formas».</div>`
+    + list.map(tarjetaOutlier).join("");
+  el.querySelectorAll("button.save").forEach(b=>b.addEventListener("click",()=>guardarOutlier(b)));
+}
 {% if local %}
 // ---- Ejecución (local) ----
 const btnRev=$("#btnRev"), btnParar=$("#btnParar");
@@ -127,6 +178,7 @@ async function poll(total){
   const pct= j.total? Math.round(100*j.done/j.total):0;
   $("#prog").style.width=pct+"%";
   $("#progTxt").textContent=`Procesados ${j.done||0}/${j.total||total} · con precio ${j.ok||0}` + (j.current?` · ${j.current}`:"");
+  renderOutliers($("#outliersLive"), j.outliers||[]);
   if(j.running){ setTimeout(()=>poll(total),1000); }
   else{
     btnRev.disabled=false; btnParar.style.display="none";
@@ -141,9 +193,11 @@ $("#btnLookup").addEventListener("click", async ()=>{
     const r=await fetch(`${BASE}/lookup`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({ean})});
     const d=await r.json();
     if(!d.ok){ $("#lookupRes").innerHTML=`<div class="muted">${esc(d.error||'Error')}</div>`; return; }
-    const rows=(d.filas||[]).map(f=>`<tr><td>${esc(f.Tienda)}</td><td>${esc(f.Nombre||'—')}</td><td class="right">${f.Estado==='OK'?eur(f.PrecioNum):esc(f.Estado)}</td></tr>`).join("");
+    const rows=(d.filas||[]).map(f=>`<tr class="${f.Outlier?'out':''}"><td>${esc(f.Tienda)}${f.Outlier?' 🚩':''}</td><td>${esc(f.Nombre||'—')}</td><td class="right">${f.Estado==='OK'?eur(f.PrecioNum):esc(f.Estado)}</td></tr>`).join("");
     $("#lookupRes").innerHTML=`<div class="muted" style="margin:8px 0">Tu PVP: <b>${eur(d.pvp)}</b> — ${esc(d.nombre_ps||'')}</div>
-      <table><thead><tr><th>Tienda</th><th>Nombre</th><th class="right">Precio</th></tr></thead><tbody>${rows}</tbody></table>`;
+      <table><thead><tr><th>Tienda</th><th>Nombre</th><th class="right">Precio</th></tr></thead><tbody>${rows}</tbody></table>
+      <div id="lookupOut"></div>`;
+    renderOutliers($("#lookupOut"), d.outliers||[]);
   }catch(e){ $("#lookupRes").innerHTML=`<div class="muted">Error: ${esc(e.message)}</div>`; }
 });
 async function recargarRuns(sel){
@@ -161,10 +215,11 @@ let chart=null;
 $("#selRun").addEventListener("change", e=>cargarRun(e.target.value));
 async function cargarRun(run_id){
   const cont=$("#tablaRun"); $("#chartWrap").style.display="none";
-  if(!run_id){ cont.innerHTML=""; return; }
+  if(!run_id){ cont.innerHTML=""; renderOutliers($("#outliersRun"),[]); return; }
   cont.innerHTML='<div class="muted">Cargando…</div>';
   try{
     const r=await fetch(`${BASE}/run/${run_id}`); const d=await r.json();
+    renderOutliers($("#outliersRun"), d.outliers||[]);
     const comp=d.comparativa||[];
     if(!comp.length){ cont.innerHTML='<div class="muted">Sin resultados con precio en esta revisión.</div>'; return; }
     cont.innerHTML=`<table><thead><tr>

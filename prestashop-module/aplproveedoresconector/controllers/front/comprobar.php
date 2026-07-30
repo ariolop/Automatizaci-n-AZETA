@@ -7,7 +7,8 @@
  *   {shop}/index.php?fc=module&module=aplproveedoresconector&controller=comprobar
  * Cuerpo (JSON, POST):  { "token": "...", "eans": ["...","..."] }
  * Respuesta:
- *   { "success": true, "existentes": { "<ean>": {"id":N,"activo":bool,"nombre":"..."} } }
+ *   { "success": true, "existentes": { "<ean>": {"id":N,"activo":bool,"nombre":"...","precio":9.16} } }
+ *   ("precio" = PVP con IVA incluido, redondeado a 2 decimales.)
  */
 
 if (!defined('_PS_VERSION_')) {
@@ -60,10 +61,12 @@ class AplproveedoresconectorComprobarModuleFrontController extends ModuleFrontCo
                     GROUP BY p.id_product';
 
             foreach (Db::getInstance()->executeS($sql) as $r) {
+                $idp = (int) $r['id_product'];
                 $existentes[$r['ean13']] = [
-                    'id' => (int) $r['id_product'],
+                    'id' => $idp,
                     'activo' => (int) $r['active'] === 1,
                     'nombre' => $r['name'],
+                    'precio' => round((float) Product::getPriceStatic($idp, true), 2), // PVP con IVA
                 ];
             }
         }

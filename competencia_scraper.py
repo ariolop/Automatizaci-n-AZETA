@@ -27,6 +27,7 @@ import os
 import re
 import time
 import json
+import statistics
 from datetime import datetime
 from urllib.parse import urlsplit
 
@@ -128,6 +129,14 @@ TIENDAS = [
         "tipo": "generico",
         "url_busqueda": "https://www.papelerialapaz.com/es/busqueda/listaLibros.php?tipoBus=full&palabrasBusqueda={EAN}&boton=Buscar",
     },
+    {
+        # TROA (Trevenque "weblib"). La búsqueda por EAN exacto redirige a la
+        # ficha del producto. Parser dedicado: toma el precio FINAL con IVA
+        # (span.despues, ya con el descuento aplicado).
+        "nombre": "troa.es",
+        "tipo": "troa",
+        "url_busqueda": "https://www.troa.es/busqueda/listaLibros.php?tipoBus=full&aproximada=N&palabrasBusqueda={EAN}",
+    },
 ]
 
 HEADERS = {
@@ -155,6 +164,8 @@ PRECIO_MIN, PRECIO_MAX = 0.10, 1000.0
 
 # Carpeta donde se guarda el HTML de las tiendas que fallan, para diagnóstico.
 CARPETA_DEBUG = "debug_html"
+# Carpeta donde se guardan las capturas PNG de los precios outlier (CLI).
+CARPETA_CAPTURAS = "capturas_outliers"
 _HOSTS_CALENTADOS = set()   # hosts ya "visitados" para obtener cookies de sesión
 
 # ─────────────────────────────────────────────────────────────────────
@@ -319,9 +330,9 @@ def _sin_resultados(html):
     return bool(RE_SIN_RESULTADOS.search(html))
 
 
-# Enlaces a ficha de producto en la plataforma de librería (…/libro/… o …/objeto/…).
+# Enlaces a ficha de producto (…/libro/…, …/objeto/… o …/producto/… en TROA).
 RE_FICHA = re.compile(
-    r'<a[^>]+href="[^"]*/(?:libro|objeto)/[^"]*"[^>]*>\s*([^<>]{2,90}?)\s*</a>',
+    r'<a[^>]+href="[^"]*/(?:libro|objeto|producto)/[^"]*"[^>]*>\s*([^<>]{2,90}?)\s*</a>',
     re.IGNORECASE,
 )
 
@@ -463,10 +474,58 @@ def parser_hipermaterial(session, tienda, ean):
     return {"nombre": nombre[:90], "precio": None, "precio_txt": "REVISAR", "url": url}
 
 
+def parser_troa(session, tienda, ean):
+    """
+    TROA (Trevenque). La búsqueda por EAN exacto abre la ficha del producto.
+    Estructura fiable:
+        <h1 id="titulo">…</h1>            -> nombre
+        <dd>{EAN}</dd>                    -> confirma el producto
+        <span class="despues">8,70 €</span>  -> precio FINAL con IVA (con dto.)
+        <span class="antes">9,16 €</span>    -> precio anterior (sin dto.)
+    Se devuelve el precio FINAL (lo que paga el cliente).
+    """
+    url = tienda["url_busqueda"].replace("{EAN}", ean)
+    r = get(session, url)
+    if not r:
+        return resultado_vacio(url, "ERROR")
+
+    html = r.text
+    soup = BeautifulSoup(html, "lxml")
+
+    # ¿Está realmente el producto de este EAN en la página?
+    if ean not in html:
+        return resultado_vacio(url)
+
+    # Precio final con IVA: primero 'despues' (rebajado); si no hay dto., 'antes'.
+    precio = None
+    for sel in ("span.despues", "span.antes", "[itemprop='price']"):
+        el = soup.select_one(sel)
+        if el:
+            precio = a_float(el.get("content") or el.get_text(" ", strip=True))
+            if precio is not None:
+                break
+    if precio is None:   # última red: extracción genérica sobre el mismo HTML
+        precio = _buscar_precio(soup, str(soup), ean)
+
+    h = soup.select_one("#titulo") or soup.select_one("h1")
+    nombre = h.get_text(strip=True) if h else (_nombre_producto(soup) or "—")
+
+    if precio is not None:
+        return {
+            "nombre": nombre[:90],
+            "precio": precio,
+            "precio_txt": f"{precio:.2f}".replace(".", ","),
+            "url": url,
+        }
+    _dump_html(tienda["nombre"], ean, html)
+    return {"nombre": nombre[:90], "precio": None, "precio_txt": "REVISAR", "url": url}
+
+
 PARSERS = {
     "mypaper_json": parser_mypaper_json,
     "generico": parser_generico,
     "hipermaterial": parser_hipermaterial,
+    "troa": parser_troa,
 }
 
 # ─────────────────────────────────────────────────────────────────────
@@ -486,12 +545,14 @@ def enviar_a_prestashop(filas_largo):
         print("\n⚠️  Envío a PrestaShop omitido: configura PRESTASHOP_ENDPOINT y PRESTASHOP_TOKEN.")
         return
 
-    # Solo se suben registros CON precio (estado OK). Los "sin resultado",
-    # "REVISAR" o "ERROR" no se envían: no queremos filas sin datos en PrestaShop.
-    filas_ok = [f for f in filas_largo if f.get("Estado") == "OK" and f.get("Precio")]
+    # Solo se suben registros CON precio (estado OK) que NO sean outliers. Los
+    # "sin resultado", "REVISAR", "ERROR" y los outliers (precio sospechoso) no
+    # se envían: no queremos precios probablemente no reales en PrestaShop.
+    filas_ok = [f for f in filas_largo
+                if f.get("Estado") == "OK" and f.get("Precio") and not f.get("Outlier")]
     omitidas = len(filas_largo) - len(filas_ok)
     if omitidas:
-        print(f"  ({omitidas} registros sin precio omitidos; no se suben a PrestaShop)")
+        print(f"  ({omitidas} registros sin precio / outliers omitidos; no se suben a PrestaShop)")
     if not filas_ok:
         print("  No hay registros con precio que enviar.")
         return
@@ -544,6 +605,84 @@ def enviar_a_prestashop(filas_largo):
 
 
 # ─────────────────────────────────────────────────────────────────────
+# 3b-bis) DETECCIÓN DE OUTLIERS + CAPTURA DE PANTALLA
+# ─────────────────────────────────────────────────────────────────────
+
+# Un precio es "outlier" (sospechoso, probablemente no real) si se aleja más de
+# UMBRAL_OUTLIER € de la MEDIANA de los precios del resto de tiendas para el
+# mismo EAN. Solo se aplica si hay suficientes precios para fiarse de la mediana.
+UMBRAL_OUTLIER = 3.0        # € de desviación respecto a la mediana
+MIN_TIENDAS_MEDIANA = 4     # nº mínimo de precios OK para calcular la mediana
+
+
+def marcar_outliers(filas, umbral=UMBRAL_OUTLIER, min_tiendas=MIN_TIENDAS_MEDIANA):
+    """
+    Anota, sobre las filas de UN MISMO EAN, cuáles son outliers de precio.
+
+    Añade a cada fila dos claves:
+        'Outlier' (bool)  -> True si el precio se desvía > `umbral` € de la mediana
+        'Mediana' (float|None) -> la mediana de referencia usada (o None)
+
+    No modifica 'Estado' ni 'Precio': la decisión de NO subir el outlier se toma
+    aguas arriba (la app lo aparta para revisión manual). Solo se marca si hay al
+    menos `min_tiendas` precios OK; con menos datos la mediana no es fiable y se
+    deja todo sin marcar. Función pura -> fácilmente testeable.
+    """
+    for f in filas:
+        f["Outlier"] = False
+        f["Mediana"] = None
+
+    ok = [f for f in filas if f.get("Estado") == "OK" and f.get("PrecioNum") is not None]
+    if len(ok) < min_tiendas:
+        return filas
+
+    med = round(statistics.median(f["PrecioNum"] for f in ok), 2)
+    for f in ok:
+        f["Mediana"] = med
+        f["Outlier"] = abs(f["PrecioNum"] - med) > umbral
+    return filas
+
+
+def capturar_pantalla(url, ruta_png, timeout_ms=20000, espera_ms=1500):
+    """
+    Renderiza `url` en un navegador headless (Chromium vía Playwright) y guarda un
+    PNG en `ruta_png`. Devuelve la ruta si tuvo éxito, o None si Playwright no está
+    instalado o la captura falla. Pensada SOLO para local (los outliers son raros,
+    así que el coste de abrir el navegador es asumible).
+
+    Requiere (solo en local):
+        pip install playwright && playwright install chromium
+    """
+    try:
+        from playwright.sync_api import sync_playwright
+    except ImportError:
+        print("[competencia] Playwright no instalado: no se captura pantalla. "
+              "Instala con:  pip install playwright  &&  playwright install chromium")
+        return None
+    try:
+        carpeta = os.path.dirname(ruta_png)
+        if carpeta:
+            os.makedirs(carpeta, exist_ok=True)
+        with sync_playwright() as p:
+            navegador = p.chromium.launch(args=["--no-sandbox"])
+            try:
+                pagina = navegador.new_page(
+                    viewport={"width": 1366, "height": 900},
+                    locale="es-ES",
+                    user_agent=HEADERS["User-Agent"],
+                )
+                pagina.goto(url, timeout=timeout_ms, wait_until="domcontentloaded")
+                pagina.wait_for_timeout(espera_ms)
+                pagina.screenshot(path=ruta_png, full_page=True)
+            finally:
+                navegador.close()
+        return ruta_png
+    except Exception as e:  # noqa: BLE001
+        print(f"[competencia] no se pudo capturar {url}: {type(e).__name__}: {e}")
+        return None
+
+
+# ─────────────────────────────────────────────────────────────────────
 # 3c) FUNCIÓN REUTILIZABLE — consulta de un solo EAN (la usa la app web)
 # ─────────────────────────────────────────────────────────────────────
 
@@ -583,6 +722,7 @@ def buscar_ean(ean, session=None, tiendas=None, pausa=None):
         })
         if pausa and i < len(tiendas) - 1:
             time.sleep(pausa)
+    marcar_outliers(filas)   # anota 'Outlier'/'Mediana' sobre las filas de este EAN
     return filas
 
 
@@ -605,6 +745,7 @@ def main():
     for ean in EANS:
         print(f"\nEAN {ean}")
         fila = {"EAN": ean, "Fecha": fecha}
+        filas_ean = []   # filas de ESTE EAN (para calcular la mediana / outliers)
 
         for tienda in TIENDAS:
             parser = PARSERS.get(tienda["tipo"], parser_generico)
@@ -626,16 +767,31 @@ def main():
             fila[f"Nombre ({n})"] = res["nombre"]
             fila[f"URL ({n})"] = res["url"]
 
-            filas_largo.append({
+            registro = {
                 "EAN": ean,
                 "Fecha": fecha,
                 "Tienda": n,
                 "Nombre": res["nombre"],
                 "Precio": (f"{res['precio']:.2f}".replace(".", ",") if res["precio"] is not None else ""),
+                "PrecioNum": res["precio"],
                 "Estado": "OK" if res["precio"] is not None else estado,
                 "URL": res["url"],
-            })
+            }
+            filas_ean.append(registro)     # misma referencia -> se marcará abajo
+            filas_largo.append(registro)
             time.sleep(PAUSA_ENTRE)
+
+        # Marca outliers de este EAN (mediana ±3 €, mín. 4 tiendas) y captura PNG.
+        marcar_outliers(filas_ean)
+        for f in filas_ean:
+            if f.get("Outlier"):
+                med = f.get("Mediana")
+                print(f"    ⚠️  OUTLIER {f['Tienda']}: {f['Precio']} € "
+                      f"(mediana {med} €) -> no se sube; capturando pantalla…")
+                slug = re.sub(r"[^a-z0-9]+", "_", f["Tienda"].lower())
+                ruta = os.path.join(CARPETA_CAPTURAS, f"{ean}_{slug}.png")
+                if capturar_pantalla(f["URL"], ruta):
+                    print(f"       ↳ captura: {ruta}")
 
         filas_ancho.append(fila)
 
@@ -651,17 +807,23 @@ def main():
 
     # ── CSV LARGO (tidy) ──────────────────────────────────────
     with open(ARCHIVO_LARGO, "w", newline="", encoding="utf-8-sig") as f:
-        w = csv.DictWriter(f, fieldnames=["EAN", "Fecha", "Tienda", "Nombre", "Precio", "Estado", "URL"])
+        w = csv.DictWriter(
+            f,
+            fieldnames=["EAN", "Fecha", "Tienda", "Nombre", "Precio", "Estado", "URL", "Mediana", "Outlier"],
+            extrasaction="ignore",
+        )
         w.writeheader()
         w.writerows(filas_largo)
 
     # ── RESUMEN ───────────────────────────────────────────────
     ok = sum(1 for r in filas_largo if r["Estado"] == "OK")
     revisar = sum(1 for r in filas_largo if r["Estado"] == "REVISAR")
+    outliers = sum(1 for r in filas_largo if r.get("Outlier"))
     total = len(filas_largo)
     print("\n" + "=" * 62)
     print(f"  ✅ Precios encontrados : {ok}/{total}")
     print(f"  ⚠️  A revisar a mano   : {revisar}")
+    print(f"  🚩 Outliers (no subidos): {outliers}")
     print(f"  📄 {ARCHIVO_ANCHO}  y  {ARCHIVO_LARGO}")
     print("=" * 62)
 

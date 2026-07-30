@@ -1,0 +1,11 @@
+# Dependencias SOLO para la ejecución en LOCAL del scraper de competencia.
+# No se instalan en Render (allí la ejecución está deshabilitada); mantenerlas
+# fuera de requirements.txt evita inflar el build de producción.
+#
+# Instalación (una sola vez, en tu equipo):
+#     pip install -r requirements-local.txt
+#     playwright install chromium
+#
+# Playwright se usa para capturar la pantalla de los precios "outlier"
+# (fuera de ±3 € de la mediana) y poder revisarlos a mano antes de subirlos.
+playwright>=1.44

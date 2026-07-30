@@ -25,6 +25,11 @@ env/
 .DS_Store
 Thumbs.db
 
+# Artefactos locales del scraper de competencia (HTML de debug y capturas PNG)
+debug_html/
+capturas_outliers/
+competencia_app/static/capturas/
+
 migrar_monitor_a_supabase.py
 
 *.sql

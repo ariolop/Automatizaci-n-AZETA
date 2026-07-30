@@ -105,7 +105,8 @@ class PrestashopClient:
         return self._parse(r).get("productos", [])
 
     def comprobar_eans(self, eans: list, timeout: int = 40) -> dict:
-        """Devuelve {ean: {id, activo, nombre}} de los EANs que YA existen en la tienda."""
+        """Devuelve {ean: {id, activo, nombre, precio}} de los EANs que YA existen
+        en la tienda. 'precio' es el PVP con IVA incluido (módulo >= 1.3.0)."""
         eans = [str(e) for e in eans if e]
         if not eans:
             return {}

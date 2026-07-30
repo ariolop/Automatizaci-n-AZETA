@@ -10,10 +10,14 @@ from __future__ import annotations
 
 import os
 import re
+import json
 import threading
 import uuid
+from datetime import datetime
+from pathlib import Path
 
-from flask import Flask, jsonify, render_template, request
+from flask import Flask, jsonify, render_template, request, send_file
+from werkzeug.security import safe_join
 
 import competencia_scraper as scr
 import competencia_comun as cc
@@ -21,8 +25,59 @@ import busqueda_comun as bc
 
 app = Flask(__name__)
 
+# Carpeta local donde se guardan las capturas PNG de los outliers y el índice
+# outliers.json de cada run (para revisión manual). Se sirve vía /captura/…
+CAPTURAS_DIR = Path(__file__).resolve().parent / "static" / "capturas"
+
 _JOB: dict = {"running": False}
 _LOCK = threading.Lock()
+
+
+# --------------------------------------------------------------------------- #
+# Outliers: captura de pantalla + persistencia por run (para revisión manual)
+# --------------------------------------------------------------------------- #
+def _slug(texto: str) -> str:
+    return re.sub(r"[^a-z0-9]+", "_", (texto or "").lower()).strip("_") or "x"
+
+
+def _registro_outlier(run_id: str, ean: str, fila: dict, info: dict) -> dict:
+    """Genera la captura PNG del outlier y devuelve su registro para la UI."""
+    carpeta = CAPTURAS_DIR / run_id
+    nombre_png = f"{ean}_{_slug(fila.get('Tienda'))}.png"
+    ruta_png = carpeta / nombre_png
+    captura = scr.capturar_pantalla(fila.get("URL"), str(ruta_png))
+    return {
+        "run_id": run_id,
+        "ean": ean,
+        "tienda": fila.get("Tienda"),
+        "nombre": fila.get("Nombre"),
+        "precio": fila.get("PrecioNum"),
+        "precio_txt": fila.get("Precio"),
+        "mediana": fila.get("Mediana"),
+        "url": fila.get("URL"),
+        "pvp": info.get("pvp"),
+        "nombre_ps": info.get("nombre"),
+        "captura": nombre_png if captura else None,
+        "guardado": False,
+    }
+
+
+def _leer_outliers(run_id: str) -> list[dict]:
+    ruta = CAPTURAS_DIR / run_id / "outliers.json"
+    try:
+        return json.loads(ruta.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return []
+
+
+def _escribir_outliers(run_id: str, registros: list[dict]) -> None:
+    carpeta = CAPTURAS_DIR / run_id
+    try:
+        carpeta.mkdir(parents=True, exist_ok=True)
+        (carpeta / "outliers.json").write_text(
+            json.dumps(registros, ensure_ascii=False, indent=2), encoding="utf-8")
+    except OSError as e:  # noqa: BLE001
+        print(f"[competencia] no se pudo guardar outliers.json: {e}")
 
 
 def es_local() -> bool:
@@ -115,10 +170,11 @@ def _ejecutar(run_id, eans, mapa, tiendas, pausa):
     with _LOCK:
         _JOB.clear()
         _JOB.update(running=True, cancel=False, total=len(eans), done=0, ok=0,
-                    run_id=run_id, current="")
+                    run_id=run_id, current="", outliers=[])
     cc.crear_run(run_id, [t["nombre"] for t in tiendas], len(eans))
     ses = rq.Session()
     n_ok = 0
+    outliers_run: list[dict] = []
     for ean in eans:
         with _LOCK:
             if _JOB.get("cancel"):
@@ -132,8 +188,21 @@ def _ejecutar(run_id, eans, mapa, tiendas, pausa):
         for f in filas:
             f["PVP"] = info.get("pvp")
             f["NombrePS"] = info.get("nombre")
-        cc.guardar_filas(run_id, filas)
-        okc = sum(1 for f in filas if f.get("Estado") == "OK")
+
+        # Aparta los outliers: NO se suben a Supabase; se guardan para revisión
+        # manual (con captura de pantalla) y el usuario decide si subirlos.
+        normales = [f for f in filas if not f.get("Outlier")]
+        outliers = [f for f in filas if f.get("Outlier")]
+        cc.guardar_filas(run_id, normales)
+
+        for f in outliers:
+            reg = _registro_outlier(run_id, str(ean), f, info)
+            outliers_run.append(reg)
+            with _LOCK:
+                _JOB["outliers"].append(reg)
+            _escribir_outliers(run_id, outliers_run)  # persiste tras cada uno
+
+        okc = sum(1 for f in normales if f.get("Estado") == "OK")
         n_ok += okc
         with _LOCK:
             _JOB["done"] += 1
@@ -169,8 +238,81 @@ def lookup():
         return jsonify({"error": "Falta el EAN."}), 400
     filas = scr.buscar_ean(ean, tiendas=scr.TIENDAS, pausa=0)
     info = _mapa_pvp().get(ean, {})
+
+    # Si hay outliers, se abre un "run" ligero para poder guardarlos a mano luego
+    # y se captura la pantalla de cada uno para revisión.
+    outliers = [f for f in filas if f.get("Outlier")]
+    run_id = None
+    regs = []
+    if outliers:
+        run_id = "look_" + uuid.uuid4().hex[:8]
+        cc.crear_run(run_id, [t["nombre"] for t in scr.TIENDAS], 1)
+        cc.actualizar_run(run_id, estado="consulta")
+        for f in outliers:
+            regs.append(_registro_outlier(run_id, ean, f, info))
+        _escribir_outliers(run_id, regs)
+
     return jsonify({"ok": True, "ean": ean, "pvp": info.get("pvp"),
-                    "nombre_ps": info.get("nombre"), "filas": filas})
+                    "nombre_ps": info.get("nombre"), "filas": filas,
+                    "run_id": run_id, "outliers": regs})
+
+
+# --------------------------------------------------------------------------- #
+# Outliers: servir captura, listar por run, guardar a mano tras revisión
+# --------------------------------------------------------------------------- #
+@app.route("/captura/<run_id>/<nombre>")
+def captura(run_id, nombre):
+    """Sirve la captura PNG de un outlier (protegida contra path traversal)."""
+    ruta = safe_join(str(CAPTURAS_DIR), run_id, nombre)
+    if not ruta or not os.path.isfile(ruta):
+        return "", 404
+    return send_file(ruta, mimetype="image/png")
+
+
+@app.route("/outliers/<run_id>")
+def outliers_de_run(run_id):
+    return jsonify({"ok": True, "run_id": run_id, "outliers": _leer_outliers(run_id)})
+
+
+@app.route("/guardar_outlier", methods=["POST"])
+def guardar_outlier():
+    """Sube a Supabase UN outlier concreto tras revisión manual del usuario."""
+    if not es_local():
+        return jsonify({"error": "Solo disponible en local."}), 403
+    d = request.get_json(silent=True) or {}
+    run_id = (d.get("run_id") or "").strip()
+    ean = (d.get("ean") or "").strip()
+    tienda = (d.get("tienda") or "").strip()
+    if not (run_id and ean and tienda):
+        return jsonify({"error": "Faltan datos (run_id, ean, tienda)."}), 400
+
+    precio = d.get("precio")
+    fila = {
+        "EAN": ean,
+        "Fecha": datetime.now().strftime("%d/%m/%Y %H:%M"),
+        "Tienda": tienda,
+        "Nombre": d.get("nombre"),
+        "PrecioNum": precio,
+        "Precio": (f"{precio:.2f}".replace(".", ",") if isinstance(precio, (int, float)) else ""),
+        "Estado": "OK",   # el usuario lo valida -> cuenta como precio bueno
+        "URL": d.get("url"),
+        "PVP": d.get("pvp"),
+        "NombrePS": d.get("nombre_ps"),
+    }
+    if not cc.guardar_filas(run_id, [fila]):
+        return jsonify({"error": "No se pudo guardar en Supabase."}), 500
+
+    # Marca el outlier como guardado en el índice persistido.
+    regs = _leer_outliers(run_id)
+    for r in regs:
+        if r.get("ean") == ean and r.get("tienda") == tienda:
+            r["guardado"] = True
+    _escribir_outliers(run_id, regs)
+    with _LOCK:
+        for r in _JOB.get("outliers", []):
+            if r.get("ean") == ean and r.get("tienda") == tienda:
+                r["guardado"] = True
+    return jsonify({"ok": True})
 
 
 # --------------------------------------------------------------------------- #
@@ -179,7 +321,8 @@ def lookup():
 @app.route("/run/<run_id>")
 def ver_run(run_id):
     filas = cc.resultados_de_run(run_id)
-    return jsonify({"ok": True, "comparativa": cc.comparativa(filas), "n_filas": len(filas)})
+    return jsonify({"ok": True, "comparativa": cc.comparativa(filas), "n_filas": len(filas),
+                    "outliers": _leer_outliers(run_id)})
 
 
 @app.route("/api/historico")

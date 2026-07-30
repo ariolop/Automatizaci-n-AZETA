@@ -30,13 +30,18 @@ def index():
     datos = mon.listar_pagina(proveedor=proveedor, estado=estado, buscar=buscar,
                               pagina=pagina, por_pagina=POR_PAGINA)
 
-    # ¿Cuáles de esta página existen en PrestaShop? (una sola consulta por página)
+    # ¿Cuáles de esta página existen en PrestaShop y a qué PVP (IVA incl.)?
+    # (una sola consulta por página).
     en_ps = None
+    precios_ps: dict = {}
     if bc.prestashop_configurado() and datos["filas"]:
         try:
             from prestashop_client import PrestashopClient
             eans = [f["ean"] for f in datos["filas"] if f.get("ean")]
-            en_ps = set((PrestashopClient().comprobar_eans(eans) or {}).keys())
+            existentes = PrestashopClient().comprobar_eans(eans) or {}
+            en_ps = set(existentes.keys())
+            precios_ps = {e: v.get("precio") for e, v in existentes.items()
+                          if isinstance(v, dict) and v.get("precio") is not None}
         except Exception:  # noqa: BLE001  (PrestaShop caído/mantenimiento: columna neutra)
             en_ps = None
 
@@ -51,6 +56,7 @@ def index():
         supabase_ok=mon.activo(),
         ps_ok=bc.prestashop_configurado(),
         en_ps=en_ps,
+        precios_ps=precios_ps,
     )
 
 
