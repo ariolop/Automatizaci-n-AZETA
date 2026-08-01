@@ -215,11 +215,44 @@ def _mime_imagen(b: bytes):
     return None
 
 
+def _a_jpeg(data: bytes) -> bytes | None:
+    """Transcodifica cualquier imagen soportada a JPEG (RGB) y la devuelve.
+
+    Liderpapel sirve las fotos en WEBP aunque la URL termine en .jpg. PrestaShop
+    (ImageManager::isRealImage) NO admite WEBP -> rechaza la imagen y no se sube
+    ninguna. Reconvertimos a JPEG aquí para que el módulo la acepte en cualquier
+    versión de PS, sin depender del soporte WEBP de la GD del servidor. Si ya es
+    JPEG se devuelve tal cual; si Pillow no está disponible, se devuelve None.
+    """
+    try:
+        import io
+        from PIL import Image
+    except Exception:  # noqa: BLE001 - Pillow no instalado
+        return None
+    try:
+        img = Image.open(io.BytesIO(data))
+        img.load()
+        if img.mode in ("RGBA", "LA", "P"):
+            fondo = Image.new("RGB", img.size, (255, 255, 255))
+            img = img.convert("RGBA")
+            fondo.paste(img, mask=img.split()[-1])
+            img = fondo
+        else:
+            img = img.convert("RGB")
+        buf = io.BytesIO()
+        img.save(buf, format="JPEG", quality=90)
+        return buf.getvalue()
+    except Exception:  # noqa: BLE001
+        return None
+
+
 def descargar_imagenes_b64(urls, sesion=None, max_bytes: int = 6_000_000) -> list:
     """Descarga cada URL con la sesión autenticada y devuelve data URIs base64.
 
     Ignora las que fallen, no sean imagen real o superen max_bytes. Así el
     módulo de PrestaShop no depende de poder bajar la URL (bloqueada por Akamai).
+    Todo se entrega como JPEG: las fotos de Liderpapel vienen en WEBP y PrestaShop
+    no acepta WEBP, así que se reconvierten antes de enviarlas.
     """
     if not urls:
         return []
@@ -236,6 +269,12 @@ def descargar_imagenes_b64(urls, sesion=None, max_bytes: int = 6_000_000) -> lis
             mime = _mime_imagen(data)
             if not mime:
                 continue
+            if mime != "image/jpeg":
+                # WEBP/PNG/GIF -> JPEG para que PrestaShop lo acepte.
+                jpeg = _a_jpeg(data)
+                if not jpeg:
+                    continue
+                data, mime = jpeg, "image/jpeg"
             b64 = base64.b64encode(data).decode("ascii")
             salida.append("data:%s;base64,%s" % (mime, b64))
         except Exception:  # noqa: BLE001
