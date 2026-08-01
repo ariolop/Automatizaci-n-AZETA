@@ -183,28 +183,47 @@ class AplproveedoresconectorCrearModuleFrontController extends ModuleFrontContro
     private function añadirImagen(int $idProduct, string $url, bool $cover): bool
     {
         $url = trim($url);
-        if ($url === '' || stripos($url, 'http') !== 0) {
+        if ($url === '') {
             return false;
         }
-        $contenido = Tools::file_get_contents($url);
+        // Origen de la imagen: data URI en base64 (enviado por la app, p. ej.
+        // Liderpapel tras Akamai) o URL http remota (p. ej. AZETA).
+        if (stripos($url, 'data:') === 0) {
+            $contenido = $this->decodificarDataUri($url);
+        } elseif (stripos($url, 'http') === 0) {
+            $contenido = Tools::file_get_contents($url);
+        } else {
+            return false;
+        }
         if ($contenido === false || strlen($contenido) < 100) {
+            return false;
+        }
+
+        // Descargar a temporal y validar ANTES de crear la fila Image,
+        // para no dejar filas huérfanas (con cover=1) si la imagen no es procesable.
+        $tmp = tempnam(_PS_TMP_IMG_DIR_, 'azc');
+        file_put_contents($tmp, $contenido);
+        if (!ImageManager::isRealImage($tmp) || !@getimagesize($tmp)) {
+            @unlink($tmp);
             return false;
         }
 
         $image = new Image();
         $image->id_product = $idProduct;
         $image->position = Image::getHighestPosition($idProduct) + 1;
-        $image->cover = $cover;
+        // Solo un producto puede tener cover=1; el resto debe ir a NULL, no 0.
+        $image->cover = $cover ? true : null;
         if (!$image->add()) {
+            @unlink($tmp);
             return false;
         }
-
-        $tmp = tempnam(_PS_TMP_IMG_DIR_, 'azc');
-        file_put_contents($tmp, $contenido);
 
         $destino = $image->getPathForCreation();
         if (!ImageManager::resize($tmp, $destino . '.jpg')) {
             @unlink($tmp);
+            // Borrar la fila recién creada para no dejar un cover huérfano
+            // que haga colisionar la siguiente imagen (Duplicate entry id_product_cover).
+            $image->delete();
             return false;
         }
         $tiposImagen = ImageType::getImagesTypes('products');
@@ -218,6 +237,25 @@ class AplproveedoresconectorCrearModuleFrontController extends ModuleFrontContro
         }
         @unlink($tmp);
         return true;
+    }
+
+    /**
+     * Decodifica un data URI ("data:image/jpeg;base64,....") y devuelve el
+     * binario, o false si no es válido.
+     */
+    private function decodificarDataUri(string $uri)
+    {
+        $coma = strpos($uri, ',');
+        if ($coma === false) {
+            return false;
+        }
+        $meta = substr($uri, 0, $coma);
+        $datos = substr($uri, $coma + 1);
+        if (stripos($meta, 'base64') !== false) {
+            $bin = base64_decode($datos, true);
+            return $bin === false ? false : $bin;
+        }
+        return rawurldecode($datos);
     }
 
     private function limpiar(string $txt, int $max): string

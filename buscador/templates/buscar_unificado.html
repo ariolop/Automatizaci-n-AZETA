@@ -46,6 +46,20 @@
   .barato{background:var(--gold);color:#3a2f00;font-weight:700;font-size:11px;padding:3px 9px;border-radius:20px}
   .nombre{font-size:16px;font-weight:600;margin:6px 0}
   .thumb{width:76px;height:76px;object-fit:contain;background:#fff;border-radius:8px;border:1px solid var(--line);float:right;margin-left:10px}
+  .gal{float:right;margin:0 0 10px 12px;text-align:center;max-width:100px}
+  .gal .gmain{width:100px;height:100px;object-fit:contain;background:#fff;border-radius:8px;border:1px solid var(--line);cursor:zoom-in;display:block}
+  .galthumbs{display:flex;flex-wrap:wrap;gap:4px;margin-top:5px;justify-content:center}
+  .galt{width:28px;height:28px;object-fit:contain;background:#fff;border:1px solid var(--line);border-radius:5px;cursor:pointer}
+  .galt:hover{border-color:var(--accent)}
+  .galcount{font-size:11px;color:var(--muted);margin-top:3px}
+  .lb{position:fixed;inset:0;background:rgba(0,0,0,.85);display:none;align-items:center;justify-content:center;z-index:100}
+  .lb.on{display:flex}
+  .lb img{max-width:90vw;max-height:85vh;object-fit:contain;background:#fff;border-radius:10px}
+  .lbclose{position:absolute;top:12px;right:20px;color:#fff;font-size:34px;line-height:1;cursor:pointer;user-select:none}
+  .lbnav{position:absolute;top:50%;transform:translateY(-50%);color:#fff;font-size:38px;cursor:pointer;padding:10px 16px;user-select:none;opacity:.75}
+  .lbnav:hover{opacity:1}
+  .lbprev{left:8px} .lbnext{right:8px}
+  .lbcount{position:absolute;bottom:16px;left:50%;transform:translateX(-50%);color:#fff;font-size:13px;background:rgba(0,0,0,.45);padding:3px 11px;border-radius:12px}
   .kv{display:grid;grid-template-columns:auto 1fr;gap:3px 12px;font-size:13.5px;margin:10px 0}
   .kv .k{color:var(--muted)}
   .coste{font-size:22px;font-weight:700}
@@ -129,6 +143,58 @@ async function buscar(){
   }finally{ btn.disabled=false; }
 }
 
+function galeria(imgs){
+  imgs=(imgs||[]).filter(Boolean);
+  if(!imgs.length) return "";
+  const thumbs = imgs.length>1
+    ? `<div class="galthumbs">`+imgs.map(u=>`<img class="galt" src="${esc(u)}" onerror="this.style.display='none'" onclick="this.closest('.gal').querySelector('.gmain').src=this.src">`).join("")+`</div>`
+    : "";
+  return `<div class="gal" data-imgs="${esc(JSON.stringify(imgs))}">
+    <img class="gmain" src="${esc(imgs[0])}" onerror="this.style.display='none'" title="Clic para ampliar" onclick="lbFromEl(this)">
+    ${thumbs}
+    ${imgs.length>1?`<div class="galcount">${imgs.length} fotos</div>`:''}
+  </div>`;
+}
+
+// ---- Lightbox (visor a pantalla completa) ----
+let lbImgs=[], lbIdx=0;
+function lbShow(){
+  const im=document.getElementById("lbimg");
+  im.src=lbImgs[lbIdx]||"";
+  document.getElementById("lbcount").textContent = lbImgs.length>1 ? (lbIdx+1)+" / "+lbImgs.length : "";
+  const vis = lbImgs.length>1 ? "" : "none";
+  document.querySelectorAll("#lightbox .lbnav").forEach(n=>n.style.display=vis);
+}
+function lbOpen(imgs, idx){
+  lbImgs=imgs||[]; lbIdx=idx||0;
+  if(!lbImgs.length) return;
+  lbShow();
+  document.getElementById("lightbox").classList.add("on");
+}
+function lbFromEl(el){
+  const gal=el.closest(".gal"); let imgs=[];
+  try{ imgs=JSON.parse(gal.dataset.imgs||"[]"); }catch(e){ imgs=[el.getAttribute("src")]; }
+  let idx=imgs.indexOf(el.getAttribute("src")); if(idx<0) idx=0;
+  lbOpen(imgs, idx);
+}
+function lbStep(delta, e){
+  if(e) e.stopPropagation();
+  if(!lbImgs.length) return;
+  lbIdx=(lbIdx+delta+lbImgs.length)%lbImgs.length;
+  lbShow();
+}
+function lbClose(e){
+  if(e && e.target && e.target.id==="lbimg") return;
+  document.getElementById("lightbox").classList.remove("on");
+}
+document.addEventListener("keydown", e=>{
+  const lb=document.getElementById("lightbox");
+  if(!lb || !lb.classList.contains("on")) return;
+  if(e.key==="Escape") lbClose();
+  else if(e.key==="ArrowLeft") lbStep(-1);
+  else if(e.key==="ArrowRight") lbStep(1);
+});
+
 function render(d){
   const c=d.comparacion||{}; const ya=d.ya_prestashop||{};
 
@@ -159,7 +225,7 @@ function render(d){
       return `<div class="card ${cls}"><h2>${tag}</h2>
         <div class="msg ${p.error?'err':'info'}">${esc(p.error||'No encontrado en este proveedor.')}</div></div>`;
     }
-    const img = (p.imagenes&&p.imagenes[0]) ? `<img class="thumb" src="${esc(p.imagenes[0])}" onerror="this.style.display='none'">` : "";
+    const img = galeria(p.imagenes);
     const existe = ya[p.ean];
     const kv = [];
     kv.push(["EAN", esc(p.ean||"—")]);
@@ -270,5 +336,13 @@ function onCode(code){
 $("#btnCam").addEventListener("click", ()=>{ scanning? stopCam() : startCam(); });
 $("#btnCerrarCam").addEventListener("click", stopCam);
 </script>
+
+<div id="lightbox" class="lb" onclick="lbClose(event)">
+  <span class="lbclose" onclick="lbClose(event)" title="Cerrar (Esc)">&times;</span>
+  <span class="lbnav lbprev" onclick="lbStep(-1,event)" title="Anterior (←)">&#10094;</span>
+  <img id="lbimg" src="" alt="" onclick="event.stopPropagation()">
+  <span class="lbnav lbnext" onclick="lbStep(1,event)" title="Siguiente (→)">&#10095;</span>
+  <div id="lbcount" class="lbcount"></div>
+</div>
 </body>
 </html>

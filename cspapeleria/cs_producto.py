@@ -13,6 +13,7 @@ Flujo:
      disponibilidad, imágenes y descripción.
 """
 import argparse
+import base64
 import json
 import os
 import re
@@ -189,6 +190,57 @@ def buscar_producto(patron, sesion=None, exacto=True):
                     "motivo": "el resultado no coincide con el EAN buscado"}
     ficha["encontrado"] = True
     return ficha
+
+
+# --------------------------------------------------------------------------- #
+# Descarga de imágenes en base64 (para publicar en PrestaShop)
+# --------------------------------------------------------------------------- #
+# Las imágenes de b2b.cspapeleria.com están tras Akamai: un PHP normal
+# (Tools::file_get_contents en el módulo) recibe un desafío HTML en vez del JPG.
+# Por eso las bajamos aquí, con la MISMA sesión "impersonate" que pasa el WAF,
+# y se las mandamos al módulo como data URI (base64) dentro del JSON.
+
+def _mime_imagen(b: bytes):
+    """Detecta el tipo de imagen por su cabecera (magic bytes) o None."""
+    if len(b) < 12:
+        return None
+    if b[:3] == b"\xff\xd8\xff":
+        return "image/jpeg"
+    if b[:8] == b"\x89PNG\r\n\x1a\n":
+        return "image/png"
+    if b[:6] in (b"GIF87a", b"GIF89a"):
+        return "image/gif"
+    if b[:4] == b"RIFF" and b[8:12] == b"WEBP":
+        return "image/webp"
+    return None
+
+
+def descargar_imagenes_b64(urls, sesion=None, max_bytes: int = 6_000_000) -> list:
+    """Descarga cada URL con la sesión autenticada y devuelve data URIs base64.
+
+    Ignora las que fallen, no sean imagen real o superen max_bytes. Así el
+    módulo de PrestaShop no depende de poder bajar la URL (bloqueada por Akamai).
+    """
+    if not urls:
+        return []
+    ses = sesion or CSSession()
+    salida = []
+    for u in urls:
+        try:
+            r = ses._request("GET", u)
+            if getattr(r, "status_code", 0) != 200:
+                continue
+            data = r.content or b""
+            if len(data) < 100 or len(data) > max_bytes:
+                continue
+            mime = _mime_imagen(data)
+            if not mime:
+                continue
+            b64 = base64.b64encode(data).decode("ascii")
+            salida.append("data:%s;base64,%s" % (mime, b64))
+        except Exception:  # noqa: BLE001
+            continue
+    return salida
 
 
 def main():

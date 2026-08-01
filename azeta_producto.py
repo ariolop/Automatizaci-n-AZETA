@@ -127,6 +127,26 @@ def _recargo_de(iva_pct):
     return _RECARGO_POR_IVA.get(int(round(iva_pct)), 0.0)
 
 
+def _stems_ean(*eans):
+    """Devuelve los posibles 'núcleos' de 12 dígitos con que AZETA nombra la imagen.
+
+    - EAN-13 (13 díg.): se quita el dígito de control -> primeros 12.
+    - GTIN-14 (14 díg.): se quita el prefijo de envase y el control -> 12 centrales.
+    Así casa el mismo producto tenga la ficha un EAN-13 o un GTIN-14.
+    """
+    stems = set()
+    for e in eans:
+        if not e:
+            continue
+        d = re.sub(r"\D", "", str(e))
+        if len(d) >= 13:
+            stems.add(d[:12])       # EAN-13 sin dígito de control
+            stems.add(d[-13:-1])    # GTIN-14: 12 dígitos centrales
+        elif len(d) >= 8:
+            stems.add(d[:12])
+    return stems
+
+
 # --------------------------------------------------------------------------- #
 # Parseo de la ficha
 # --------------------------------------------------------------------------- #
@@ -190,10 +210,21 @@ def parsear_ficha(html: str, ean_buscado: str | None = None, url: str | None = N
 
     # Imágenes: se filtran por el EAN REAL de la ficha (no por el patrón buscado,
     # porque AZETA puede resolver un código a un producto con EAN distinto).
-    base = (ean or ean_buscado or "").strip()[:12]
+    # El nombre de archivo usa los 12 dígitos centrales del EAN. Comparamos por ese
+    # "núcleo" para que case tanto un EAN-13 (8410782119500) como un GTIN-14 que
+    # AZETA guarda internamente (48410782119508 -> núcleo 841078211950).
+    stems = _stems_ean(ean, ean_buscado)
     imagenes = []
+    vistos = set()
     for m in re.findall(r"https://static\.azetadistribuciones\.es/imagenes[^\s\"'<>]+", html):
-        if (not base or base in m) and m not in imagenes:
+        fn = re.search(r"/(\d{8,})[^/?\"']*\.[A-Za-z]+(?:\?|$)", m)
+        stem = fn.group(1) if fn else None
+        casa = (not stems) or (stem and stem in stems) or any(s in m for s in stems)
+        # Deduplicar por la ruta sin el sufijo de caché (?v=...): la misma foto
+        # puede aparecer varias veces (href + src, distintos ?v=).
+        clave = m.split("?", 1)[0]
+        if casa and clave not in vistos:
+            vistos.add(clave)
             imagenes.append(m)
 
     encontrado = bool(es_detalle and nombre)

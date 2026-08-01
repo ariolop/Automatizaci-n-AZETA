@@ -235,6 +235,13 @@ def publicar(proveedor: str, ean: str) -> dict:
         if not raw or not raw.get("encontrado"):
             return {"ok": False, "error": "No se encontró el producto en Liderpapel."}
         payload = _mapear_cs_a_prestashop(raw)
+        # Las imágenes de Liderpapel están tras Akamai: PrestaShop no puede
+        # descargarlas por URL. Las bajamos aquí con la sesión "impersonate"
+        # y se envían como data URI (base64) dentro del propio JSON.
+        with _cs["lock"]:
+            ses_cs = _cs["ses"]
+            payload["imagenes"] = cs_producto.descargar_imagenes_b64(
+                raw.get("imagenes") or [], sesion=ses_cs)
         # Proveedor distinto para Liderpapel ("Comercial del sur").
         id_proveedor = cfg.get("PRESTASHOP_PROVEEDOR_CS", "")
     else:
