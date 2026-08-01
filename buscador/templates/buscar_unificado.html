@@ -72,6 +72,12 @@
        background:var(--panel2);color:var(--txt);border:1px solid var(--line)}
   .pub:hover{border-color:var(--accent);color:#fff}
   .pub:disabled{opacity:.5;cursor:default}
+  .pubopts{display:flex;gap:8px;margin-top:12px;flex-wrap:wrap}
+  .pubopt{flex:1;min-width:120px;display:flex;flex-direction:column;gap:4px;
+          font-size:11px;color:var(--muted)}
+  .pubopt input,.pubopt select{padding:8px;border-radius:9px;background:var(--panel2);
+          color:var(--txt);border:1px solid var(--line);font-size:13px}
+  .pubopt input:focus,.pubopt select:focus{outline:none;border-color:var(--accent)}
   .vacio{color:var(--muted);text-align:center;padding:30px 10px}
   .foot{color:var(--muted);font-size:12px;margin-top:22px;text-align:center}
   .psbox{display:flex;gap:14px;align-items:center;background:linear-gradient(180deg,rgba(90,168,50,.08),var(--panel));
@@ -241,7 +247,21 @@ function render(d){
       if(existe){
         pubBloque = `<div class="msg info">Ya existe en PrestaShop · ID ${esc(existe.id||existe.id_product||'?')} · ${existe.activo? 'activo':'desactivado'}</div>`;
       }else{
-        pubBloque = `<button class="pub" onclick="publicar(this,'${provSlug}','${esc(p.ean)}')">Publicar en PrestaShop</button>`;
+        pubBloque = `
+        <div class="pubopts">
+          <label class="pubopt">Stock (opcional)
+            <input type="number" class="pub-stock" min="0" step="1" placeholder="—">
+          </label>
+          <label class="pubopt">Modo de venta (opcional)
+            <select class="pub-modo">
+              <option value="">Sin definir</option>
+              <option value="1">Solo dropshipping</option>
+              <option value="2">Solo tienda física</option>
+              <option value="3">Ambos</option>
+            </select>
+          </label>
+        </div>
+        <button class="pub" onclick="publicar(this,'${provSlug}','${esc(p.ean)}')">Publicar en PrestaShop</button>`;
       }
     }
     const nombreAttr = esc(p.nombre||"");
@@ -261,14 +281,18 @@ function render(d){
 }
 
 async function publicar(btnEl, proveedor, ean){
-  btnEl.disabled=true; const msg=btnEl.parentElement.querySelector(".pubmsg");
+  btnEl.disabled=true; const card=btnEl.closest(".card"); const msg=card.querySelector(".pubmsg");
+  const stockEl=card.querySelector(".pub-stock"), modoEl=card.querySelector(".pub-modo");
+  const stock=stockEl && stockEl.value.trim()!=="" ? stockEl.value.trim() : null;
+  const modo_venta=modoEl && modoEl.value!=="" ? modoEl.value : null;
   msg.innerHTML='<div class="msg info"><span class="spin"></span> Publicando…</div>';
   try{
     const r=await fetch(`${BASE}/publicar`,{method:"POST",headers:{"Content-Type":"application/json"},
-      body:JSON.stringify({proveedor,ean})});
+      body:JSON.stringify({proveedor,ean,stock,modo_venta})});
     const d=await r.json();
     if(d.ok){
-      msg.innerHTML=`<div class="msg ok">Creado en PrestaShop (desactivado) · ID ${esc(d.id_product||'?')}</div>`;
+      const extra=[d.stock!=null?`stock ${esc(d.stock)}`:null, d.modo_venta!=null?`modo ${esc(d.modo_venta)}`:null].filter(Boolean).join(' · ');
+      msg.innerHTML=`<div class="msg ok">Creado en PrestaShop (desactivado) · ID ${esc(d.id_product||'?')}${extra?' · '+extra:''}</div>`;
       btnEl.remove();
     }else{
       msg.innerHTML=`<div class="msg err">${esc(d.error||'Error al publicar')}</div>`;

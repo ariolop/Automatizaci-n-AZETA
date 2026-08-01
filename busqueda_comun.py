@@ -214,11 +214,39 @@ def ya_en_prestashop(ean: str) -> dict | None:
         return None
 
 
-def publicar(proveedor: str, ean: str) -> dict:
+def _normalizar_stock(valor):
+    """Devuelve un entero >= 0 o None si no se indicó stock."""
+    if valor is None or valor == "":
+        return None
+    try:
+        return max(0, int(float(valor)))
+    except (TypeError, ValueError):
+        return None
+
+
+def _normalizar_modo_venta(valor):
+    """Modo de venta del módulo aplsalemode: 1/2/3. None si no se indicó.
+    (0 = 'sin definir' equivale a no tocar nada -> None.)"""
+    if valor is None or valor == "":
+        return None
+    try:
+        m = int(valor)
+    except (TypeError, ValueError):
+        return None
+    return m if m in (1, 2, 3) else None
+
+
+def publicar(proveedor: str, ean: str, stock=None, modo_venta=None) -> dict:
     """Re-busca el producto por EAN en el proveedor indicado y lo crea en
-    PrestaShop (desactivado). Devuelve {ok, id_product|error}."""
+    PrestaShop (desactivado). Devuelve {ok, id_product|error}.
+
+    stock y modo_venta son OPCIONALES: si van a None, el módulo no fija stock
+    (queda a 0) ni asigna modo de venta (comportamiento anterior intacto)."""
     if not prestashop_configurado():
         return {"ok": False, "error": "PrestaShop no está configurado."}
+
+    stock = _normalizar_stock(stock)
+    modo_venta = _normalizar_modo_venta(modo_venta)
 
     import config
     cfg = config.leer_config()
@@ -247,10 +275,17 @@ def publicar(proveedor: str, ean: str) -> dict:
     else:
         return {"ok": False, "error": f"Proveedor no válido: {proveedor}"}
 
+    # Campos opcionales comunes a ambos proveedores.
+    if stock is not None:
+        payload["stock"] = stock
+    if modo_venta is not None:
+        payload["modo_venta"] = modo_venta
+
     try:
         from prestashop_client import PrestashopClient
         res = PrestashopClient().crear_producto(payload, id_proveedor=id_proveedor)
         return {"ok": True, "id_product": res.get("id_product"),
-                "nombre": payload.get("nombre")}
+                "nombre": payload.get("nombre"),
+                "stock": res.get("stock"), "modo_venta": res.get("modo_venta")}
     except Exception as e:  # noqa: BLE001
         return {"ok": False, "error": str(e)}

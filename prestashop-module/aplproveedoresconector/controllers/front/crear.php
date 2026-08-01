@@ -13,7 +13,9 @@
  *   "producto": {
  *      "nombre": "...", "ean13": "...", "precio_sin_iva": 4.95, "pvp": 7.19,
  *      "fabricante": "...", "descripcion": "...", "situacion": "...",
- *      "imagenes": ["https://...","https://..."]
+ *      "imagenes": ["https://...","https://..."],
+ *      "stock": 12,          // opcional: cantidad inicial (StockAvailable)
+ *      "modo_venta": 2       // opcional: 1=dropshipping, 2=tienda física, 3=ambos (módulo aplsalemode)
  *   }
  * }
  */
@@ -141,6 +143,22 @@ class AplproveedoresconectorCrearModuleFrontController extends ModuleFrontContro
                 $this->asociarProveedor((int) $product->id, $idProveedor, $costeReal);
             }
 
+            // Stock inicial (opcional). Si no viene, se deja el que ponga PrestaShop (0).
+            $idShop = (int) $this->context->shop->id;
+            $stockFijado = null;
+            if (array_key_exists('stock', $p) && $p['stock'] !== null && $p['stock'] !== '') {
+                $stockFijado = max(0, (int) $p['stock']);
+                StockAvailable::setQuantity((int) $product->id, 0, $stockFijado, $idShop);
+            }
+
+            // Modo de venta (opcional): lo gestiona el módulo aplsalemode. Se aplica
+            // DESPUÉS del stock, porque "tienda física" calcula la disponibilidad a
+            // partir del stock. Es defensivo: si el módulo no está, no hace nada.
+            $modoAplicado = null;
+            if (array_key_exists('modo_venta', $p) && $p['modo_venta'] !== null && $p['modo_venta'] !== '') {
+                $modoAplicado = $this->aplicarModoVenta((int) $product->id, $idShop, (int) $p['modo_venta']);
+            }
+
             // Imágenes
             $imagenes = isset($p['imagenes']) && is_array($p['imagenes']) ? $p['imagenes'] : [];
             $imgOk = 0;
@@ -161,9 +179,44 @@ class AplproveedoresconectorCrearModuleFrontController extends ModuleFrontContro
                 'imagenes_diag' => $imgDiag,
                 'activo' => false,
                 'disponible_para_pedido' => (bool) $permiteDs,
+                'stock' => $stockFijado,
+                'modo_venta' => $modoAplicado,
             ]);
         } catch (Exception $e) {
             $this->responder(['success' => false, 'error' => $e->getMessage()], 500);
+        }
+    }
+
+    /**
+     * Aplica el "modo de venta" del producto delegando en el módulo aplsalemode
+     * (tabla aplsalemode_product + sincronización de flags de stock). Defensivo:
+     * si el módulo no está instalado/activo o falla la carga, no hace nada y
+     * devuelve null. Devuelve el modo aplicado (int) si tiene éxito.
+     *
+     * Modos: 1 = dropshipping, 2 = tienda física, 3 = ambos. (0 = sin definir.)
+     */
+    private function aplicarModoVenta(int $idProduct, int $idShop, int $modo)
+    {
+        if ($idProduct <= 0 || $modo <= 0) {
+            return null;
+        }
+        if (!Module::isInstalled('aplsalemode') || !Module::isEnabled('aplsalemode')) {
+            return null;
+        }
+        // Cargar el módulo para que registre su autoloader PSR-4.
+        $mod = Module::getInstanceByName('aplsalemode');
+        if (!$mod) {
+            return null;
+        }
+        $clase = 'PrestaShop\\Module\\Aplsalemode\\Service\\SaleModeManager';
+        if (!class_exists($clase)) {
+            return null;
+        }
+        try {
+            $manager = new $clase();
+            return $manager->applyMode($idProduct, $idShop, $modo) ? $modo : null;
+        } catch (Exception $e) {
+            return null;
         }
     }
 

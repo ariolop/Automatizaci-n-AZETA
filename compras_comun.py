@@ -210,6 +210,21 @@ def enlazar_ean(clave: str, ean_resuelto: str) -> bool:
         return False
 
 
+def rellenar_nombre(clave: str, nombre: str) -> bool:
+    """Rellena el nombre SOLO en las filas de la clave que aún no lo tienen
+    (nombre nulo), para no pisar un nombre escrito a mano."""
+    if not activo() or not (clave and nombre):
+        return False
+    try:
+        r = requests.patch(_url(),
+                           params={"clave": f"eq.{clave}", "nombre": "is.null"},
+                           json={"nombre": nombre},
+                           headers=_headers({"Prefer": "return=minimal"}), timeout=_TIMEOUT)
+        return r.status_code < 300
+    except Exception:  # noqa: BLE001
+        return False
+
+
 def guardar_precio_actual(clave: str, precio: float | None) -> bool:
     """Actualiza el snapshot de precio actual para todas las filas de una clave."""
     if not activo() or not clave:

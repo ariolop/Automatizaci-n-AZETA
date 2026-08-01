@@ -319,6 +319,9 @@ $$('.b-precio').forEach(b=>b.addEventListener('click',async e=>{
   let pct=null;
   if(j.precio_actual!=null && pagado){pct=Math.round((pagado-j.precio_actual)/j.precio_actual*1000)/10;}
   tr.querySelector('.var-actual').innerHTML=varHtml(pct);
+  if(j.nombre){const nd=tr.querySelector('td div');
+    const t=(nd.textContent||'').trim();
+    if(!t||t==='(sin nombre)') nd.textContent=j.nombre;}
   toast('Precio actualizado');
 }));
 

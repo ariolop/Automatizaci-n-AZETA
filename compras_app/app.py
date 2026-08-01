@@ -278,6 +278,10 @@ def precio_actual():
     ean_nuevo = (res.get("ean") or "").strip()
     if ean_nuevo and not ean:
         cc.enlazar_ean(clave, ean_nuevo)
+    # Rellena el nombre en las filas que no lo tuvieran (no pisa el escrito a mano).
+    nombre_nuevo = (res.get("nombre") or "").strip()
+    if nombre_nuevo:
+        cc.rellenar_nombre(clave, nombre_nuevo)
 
     return jsonify({"ok": True, "precio_actual": precio, "ean_resuelto": ean_nuevo or None,
                     "nombre": res.get("nombre")})

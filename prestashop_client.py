@@ -80,6 +80,9 @@ class PrestashopClient:
                 "situacion": datos.get("situacion"),
                 "dropshipping": datos.get("dropshipping", True),
                 "imagenes": datos.get("imagenes") or [],
+                # Opcionales: si van a None el módulo no los toca.
+                "stock": datos.get("stock"),
+                "modo_venta": datos.get("modo_venta"),
             },
         }
         try:
