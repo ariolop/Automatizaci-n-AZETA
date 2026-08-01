@@ -100,7 +100,7 @@
         <thead><tr>
           <th>Producto</th><th>Prov.</th><th>Compras</th><th>Última</th>
           <th class="num">Últ. precio</th><th class="num">vs anterior</th>
-          <th class="num">Precio actual</th><th class="num">Pagado vs actual</th><th></th>
+          <th class="num">Precio actual</th><th class="num">Pagado vs hoy</th><th></th>
         </tr></thead>
         <tbody>
         {% for p in productos %}
@@ -317,7 +317,7 @@ $$('.b-precio').forEach(b=>b.addEventListener('click',async e=>{
   tr.querySelector('.precio-actual').textContent=eur(j.precio_actual);
   const pagado=Number((tr.querySelector('td.num').textContent||'').replace(/[^\d,.-]/g,'').replace('.','').replace(',','.'));
   let pct=null;
-  if(j.precio_actual!=null && pagado){pct=Math.round((j.precio_actual-pagado)/pagado*1000)/10;}
+  if(j.precio_actual!=null && pagado){pct=Math.round((pagado-j.precio_actual)/j.precio_actual*1000)/10;}
   tr.querySelector('.var-actual').innerHTML=varHtml(pct);
   toast('Precio actualizado');
 }));

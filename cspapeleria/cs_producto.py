@@ -143,12 +143,18 @@ def parsear_ficha(html, cod_product, base):
     d["stock"] = _num_es(stock) if stock is not None else None
     d["disponible"] = bool(d["stock"]) and d["stock"] > 0
 
-    # Imágenes (patrón por código de producto)
+    # Imágenes (patrón por código de producto).
+    # OJO: el código del buscador viene SIN ceros a la izquierda (p. ej. "1535"),
+    # pero el fichero de la imagen sí los lleva, rellenado a un mínimo de 5
+    # dígitos ("01535g.jpg", "multi/01535_s3_....jpg"). Aceptamos ceros de
+    # relleno opcionales (0*) anclando en la barra previa para no confundir con
+    # el código de otro producto (p. ej. "21535").
+    cod = re.escape(str(cod_product).lstrip("0") or str(cod_product))
     imgs = []
-    m = re.search(r'src="([^"]*resources/img/products/' + re.escape(str(cod_product)) + r'g\.jpg)"', html, re.I)
+    m = re.search(r'(resources/img/products/0*' + cod + r'g\.jpg)', html, re.I)
     if m:
         imgs.append(urljoin(base + "/", m.group(1)))
-    for mm in re.findall(r'([^"\']*resources/img/products/multi/' + re.escape(str(cod_product)) + r'_s\d+_[a-f0-9]+\.jpg)', html, re.I):
+    for mm in re.findall(r'(resources/img/products/multi/0*' + cod + r'_s\d+_[a-f0-9]+\.jpg)', html, re.I):
         u = urljoin(base + "/", mm)
         if u not in imgs:
             imgs.append(u)

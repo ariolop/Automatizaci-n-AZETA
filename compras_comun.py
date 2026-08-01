@@ -262,7 +262,8 @@ def resumen_por_producto(filas: list[dict] | None = None) -> list[dict]:
             if it.get("precio_actual") is not None:
                 precio_actual = _num(it.get("precio_actual"))
                 break
-        var_actual = _pct(p_ult, precio_actual)  # >0: ahora está más caro que lo pagado
+        # Referencia = precio de HOY; dice si tu última compra fue más cara/barata.
+        var_actual = _pct(precio_actual, p_ult)  # >0: pagaste más caro que hoy; <0: más barato
 
         ean = next((it.get("ean") for it in items_ord if it.get("ean")), None)
         ean_res = next((it.get("ean_resuelto") for it in items_ord if it.get("ean_resuelto")), None)

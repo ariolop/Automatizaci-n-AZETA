@@ -144,16 +144,21 @@ class AplproveedoresconectorCrearModuleFrontController extends ModuleFrontContro
             // Imágenes
             $imagenes = isset($p['imagenes']) && is_array($p['imagenes']) ? $p['imagenes'] : [];
             $imgOk = 0;
+            $imgDiag = [];   // diagnóstico por imagen (para depurar por qué no suben)
             foreach ($imagenes as $i => $urlImg) {
-                if ($this->añadirImagen((int) $product->id, $urlImg, $imgOk === 0)) {
+                $motivo = $this->añadirImagen((int) $product->id, $urlImg, $imgOk === 0);
+                if ($motivo === 'ok') {
                     $imgOk++;
                 }
+                $imgDiag[] = ['i' => $i, 'motivo' => $motivo];
             }
 
             $this->responder([
                 'success' => true,
                 'id_product' => (int) $product->id,
+                'imagenes_recibidas' => count($imagenes),
                 'imagenes_subidas' => $imgOk,
+                'imagenes_diag' => $imgDiag,
                 'activo' => false,
                 'disponible_para_pedido' => (bool) $permiteDs,
             ]);
@@ -180,11 +185,15 @@ class AplproveedoresconectorCrearModuleFrontController extends ModuleFrontContro
         // además fijamos el proveedor por defecto en el producto, ya hecho con id_supplier).
     }
 
-    private function añadirImagen(int $idProduct, string $url, bool $cover): bool
+    /**
+     * Añade una imagen al producto. Devuelve 'ok' si se sube, o un código de
+     * motivo si se descarta (para poder depurar por qué no aparecen imágenes).
+     */
+    private function añadirImagen(int $idProduct, string $url, bool $cover): string
     {
         $url = trim($url);
         if ($url === '') {
-            return false;
+            return 'vacia';
         }
         // Origen de la imagen: data URI en base64 (enviado por la app, p. ej.
         // Liderpapel tras Akamai) o URL http remota (p. ej. AZETA).
@@ -193,10 +202,10 @@ class AplproveedoresconectorCrearModuleFrontController extends ModuleFrontContro
         } elseif (stripos($url, 'http') === 0) {
             $contenido = Tools::file_get_contents($url);
         } else {
-            return false;
+            return 'origen_no_soportado';
         }
         if ($contenido === false || strlen($contenido) < 100) {
-            return false;
+            return 'contenido_invalido';
         }
 
         // Descargar a temporal y validar ANTES de crear la fila Image,
@@ -205,7 +214,7 @@ class AplproveedoresconectorCrearModuleFrontController extends ModuleFrontContro
         file_put_contents($tmp, $contenido);
         if (!ImageManager::isRealImage($tmp) || !@getimagesize($tmp)) {
             @unlink($tmp);
-            return false;
+            return 'no_es_imagen_real';
         }
 
         $image = new Image();
@@ -215,7 +224,7 @@ class AplproveedoresconectorCrearModuleFrontController extends ModuleFrontContro
         $image->cover = $cover ? true : null;
         if (!$image->add()) {
             @unlink($tmp);
-            return false;
+            return 'add_fallo';
         }
 
         $destino = $image->getPathForCreation();
@@ -224,7 +233,7 @@ class AplproveedoresconectorCrearModuleFrontController extends ModuleFrontContro
             // Borrar la fila recién creada para no dejar un cover huérfano
             // que haga colisionar la siguiente imagen (Duplicate entry id_product_cover).
             $image->delete();
-            return false;
+            return 'resize_fallo';
         }
         $tiposImagen = ImageType::getImagesTypes('products');
         foreach ($tiposImagen as $t) {
@@ -236,7 +245,7 @@ class AplproveedoresconectorCrearModuleFrontController extends ModuleFrontContro
             );
         }
         @unlink($tmp);
-        return true;
+        return 'ok';
     }
 
     /**
