@@ -236,6 +236,45 @@ def _normalizar_modo_venta(valor):
     return m if m in (1, 2, 3) else None
 
 
+def actualizar_prestashop(ean: str | None = None, id_product=None,
+                          precio=None, stock=None, ean13=None) -> dict:
+    """Actualiza EAN13, precio (CON IVA) y/o stock de un producto YA existente en
+    PrestaShop, localizado por EAN actual (o id_product). Devuelve {ok, ...}."""
+    if not prestashop_configurado():
+        return {"ok": False, "error": "PrestaShop no está configurado."}
+    if not ean and not id_product:
+        return {"ok": False, "error": "Falta 'ean' o 'id_product'."}
+
+    cambios: dict = {}
+    if ean13 is not None and str(ean13).strip() != "":
+        nuevo = "".join(ch for ch in str(ean13) if ch.isdigit())
+        if not nuevo:
+            return {"ok": False, "error": "EAN no válido."}
+        if nuevo != (ean or ""):
+            cambios["ean13"] = nuevo
+    if precio is not None and str(precio).strip() != "":
+        try:
+            cambios["precio"] = float(str(precio).replace(",", "."))
+        except (TypeError, ValueError):
+            return {"ok": False, "error": "Precio no válido."}
+    if stock is not None and str(stock).strip() != "":
+        s = _normalizar_stock(stock)
+        if s is None:
+            return {"ok": False, "error": "Stock no válido."}
+        cambios["stock"] = s
+
+    if not cambios:
+        return {"ok": False, "error": "Nada que actualizar."}
+
+    try:
+        from prestashop_client import PrestashopClient
+        res = PrestashopClient().actualizar_producto(
+            id_product=id_product, ean=ean, cambios=cambios)
+        return {"ok": True, **res}
+    except Exception as e:  # noqa: BLE001
+        return {"ok": False, "error": str(e)}
+
+
 def publicar(proveedor: str, ean: str, stock=None, modo_venta=None) -> dict:
     """Re-busca el producto por EAN en el proveedor indicado y lo crea en
     PrestaShop (desactivado). Devuelve {ok, id_product|error}.

@@ -76,6 +76,18 @@ def publicar():
     return jsonify(res), codigo
 
 
+@app.route("/actualizar", methods=["POST"])
+def actualizar():
+    """Actualiza precio (con IVA) y/o stock de un producto ya existente en PrestaShop."""
+    data = request.get_json(silent=True) or {}
+    ean = (data.get("ean") or "").strip()
+    if not ean:
+        return jsonify({"ok": False, "error": "Falta 'ean'."}), 400
+    res = bc.actualizar_prestashop(ean=ean, precio=data.get("precio"),
+                                   stock=data.get("stock"), ean13=data.get("ean13"))
+    return jsonify(res), (200 if res.get("ok") else 400)
+
+
 @app.route("/monitor", methods=["POST"])
 def add_monitor():
     """Añade el producto al monitor unificado (proveedor según la ficha)."""

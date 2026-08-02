@@ -104,13 +104,25 @@ class AplproveedoresconectorCrearModuleFrontController extends ModuleFrontContro
                 $product->description = [$idLang => $descripcion];
                 $product->description_short = [$idLang => $this->limpiar($descripcion, 400)];
             }
-            // Precio de venta base (sin IVA): usamos el PVP recomendado si viene; si no, el coste.
-            $pvp = isset($p['pvp']) ? (float) $p['pvp'] : null;
-            $precioUnidad = (float) ($p['precio_sin_iva'] ?? 0);
-            $product->price = $pvp !== null && $pvp > 0 ? $pvp : $precioUnidad;
             // Coste del producto (precio de compra) = coste real con IVA + recargo de equivalencia
+            $precioUnidad = (float) ($p['precio_sin_iva'] ?? 0);
             $costeReal = isset($p['coste_real']) ? (float) $p['coste_real'] : $precioUnidad;
             $product->wholesale_price = $costeReal;
+
+            // Precio de venta: el PVP CON IVA = coste x MARGEN. PrestaShop almacena
+            // el precio base (sin IVA), así que lo convertimos con el tipo de impuesto.
+            $MARGEN_PVP = 1.5;
+            $tasaIva = $this->tasaImpuesto($idImpuestos);   // % (p. ej. 21.0)
+            if ($costeReal > 0) {
+                $pvpConIva = $costeReal * $MARGEN_PVP;
+                $product->price = $tasaIva > 0
+                    ? round($pvpConIva / (1 + $tasaIva / 100), 6)
+                    : round($pvpConIva, 6);
+            } else {
+                // Sin coste: caemos al PVP recomendado o al precio sin IVA del proveedor.
+                $pvp = isset($p['pvp']) ? (float) $p['pvp'] : null;
+                $product->price = $pvp !== null && $pvp > 0 ? $pvp : $precioUnidad;
+            }
 
             $product->id_category_default = $idCategoria;
             $product->ean13 = $ean;
@@ -318,6 +330,25 @@ class AplproveedoresconectorCrearModuleFrontController extends ModuleFrontContro
             return $bin === false ? false : $bin;
         }
         return rawurldecode($datos);
+    }
+
+    /**
+     * Tipo de IVA (%) de una regla de impuestos, usando el país por defecto de
+     * la tienda. Devuelve 0.0 si no se puede determinar (sin impuestos).
+     */
+    private function tasaImpuesto(int $idTaxRulesGroup): float
+    {
+        if ($idTaxRulesGroup <= 0) {
+            return 0.0;
+        }
+        try {
+            $address = new Address();
+            $address->id_country = (int) Configuration::get('PS_COUNTRY_DEFAULT');
+            $tm = TaxManagerFactory::getManager($address, $idTaxRulesGroup);
+            return (float) $tm->getTaxCalculator()->getTotalRate();
+        } catch (Exception $e) {
+            return 0.0;
+        }
     }
 
     private function limpiar(string $txt, int $max): string

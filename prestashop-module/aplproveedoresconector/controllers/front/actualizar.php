@@ -11,7 +11,12 @@
  * {
  *   "token": "...",
  *   "id_product": 123,        // (o "ean": "8411..." para localizarlo por EAN)
- *   "producto": { "ean13": "8411...", "nombre": "Nuevo nombre" }
+ *   "producto": {
+ *     "ean13": "8411...",
+ *     "nombre": "Nuevo nombre",
+ *     "precio": 12.34,          // precio CON IVA (se guarda el base sin IVA)
+ *     "stock": 25               // cantidad disponible (StockAvailable)
+ *   }
  * }
  */
 
@@ -76,17 +81,40 @@ class AplproveedoresconectorActualizarModuleFrontController extends ModuleFrontC
             }
             $cambios[] = 'nombre';
         }
+        // Precio: llega CON IVA; se almacena el precio base (sin IVA) según la
+        // regla de impuestos del propio producto.
+        if (array_key_exists('precio', $p) && $p['precio'] !== null && $p['precio'] !== '') {
+            $conIva = (float) str_replace(',', '.', (string) $p['precio']);
+            if ($conIva >= 0) {
+                $rate = (float) $product->getTaxesRate();   // p. ej. 21.0
+                $sinIva = $rate > 0 ? $conIva / (1 + $rate / 100) : $conIva;
+                $product->price = round($sinIva, 6);
+                $cambios[] = 'precio';
+            }
+        }
+
+        // Stock: se gestiona aparte (StockAvailable), no depende de save().
+        if (array_key_exists('stock', $p) && $p['stock'] !== null && $p['stock'] !== '') {
+            $stock = max(0, (int) $p['stock']);
+            StockAvailable::setQuantity($id, 0, $stock, (int) $this->context->shop->id);
+            $cambios[] = 'stock';
+        }
 
         if (!$cambios) {
             $this->responder(['success' => false, 'error' => 'Nada que actualizar'], 400);
         }
 
-        try {
-            if (!$product->save()) {
-                $this->responder(['success' => false, 'error' => 'No se pudo guardar'], 500);
+        // Solo guardamos el objeto Product si hubo cambios propios de él
+        // (ean13/nombre/precio); el stock ya se aplicó por separado.
+        $cambiosProducto = array_diff($cambios, ['stock']);
+        if ($cambiosProducto) {
+            try {
+                if (!$product->save()) {
+                    $this->responder(['success' => false, 'error' => 'No se pudo guardar'], 500);
+                }
+            } catch (Exception $e) {
+                $this->responder(['success' => false, 'error' => $e->getMessage()], 500);
             }
-        } catch (Exception $e) {
-            $this->responder(['success' => false, 'error' => $e->getMessage()], 500);
         }
 
         $this->responder([

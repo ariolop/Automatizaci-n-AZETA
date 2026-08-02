@@ -75,6 +75,9 @@ class AplproveedoresconectorFichaModuleFrontController extends ModuleFrontContro
             $imagen = '';
         }
 
+        // Stock disponible (por producto, todas las combinaciones)
+        $stock = (int) StockAvailable::getQuantityAvailableByProduct($id);
+
         $this->responder([
             'success' => true,
             'encontrado' => true,
@@ -83,6 +86,8 @@ class AplproveedoresconectorFichaModuleFrontController extends ModuleFrontContro
             'activo' => (bool) $product->active,
             'precio' => round((float) Product::getPriceStatic($id, true), 2),
             'precio_sin_iva' => round((float) Product::getPriceStatic($id, false), 2),
+            'iva_pct' => round((float) $product->getTaxesRate(), 2),
+            'stock' => $stock,
             'imagen' => $imagen,
         ]);
     }

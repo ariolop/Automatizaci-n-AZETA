@@ -132,22 +132,45 @@ const eanEl=$("#ean"), btn=$("#btn"), statusEl=$("#status"), cardsEl=$("#cards")
 const esc = s => (s??"").toString().replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
 const fmt = n => (n===null||n===undefined||n==="")?"—":Number(n).toLocaleString("es-ES",{minimumFractionDigits:2,maximumFractionDigits:2})+" €";
 
+let currentAbort=null;
+function setSearching(on){
+  if(on){
+    eanEl.disabled=true;
+    btn.textContent="Cancelar";
+    btn.classList.add("sec");
+  }else{
+    eanEl.disabled=false;
+    btn.textContent="Buscar";
+    btn.classList.remove("sec");
+    eanEl.focus();
+  }
+}
+
 async function buscar(){
+  if(currentAbort) return;               // ya hay una búsqueda en curso: ignora relecturas
   const ean=eanEl.value.trim();
   if(!ean){eanEl.focus();return;}
   const azeta=$("#cAzeta").checked, cs=$("#cCs").checked;
   if(!azeta && !cs){statusEl.textContent="Marca al menos un proveedor.";return;}
-  btn.disabled=true; vacioEl.style.display="none"; cardsEl.innerHTML="";
+  vacioEl.style.display="none"; cardsEl.innerHTML="";
+  currentAbort=new AbortController();
+  setSearching(true);
   statusEl.innerHTML='<span class="spin"></span> Consultando '+[azeta?'AZETA':null,cs?'Liderpapel':null].filter(Boolean).join(' y ')+'…';
   try{
     const url=`${BASE}/api/buscar?ean=${encodeURIComponent(ean)}&azeta=${azeta?1:0}&cs=${cs?1:0}`;
-    const r=await fetch(url); const d=await r.json();
-    if(!d.ok){statusEl.innerHTML=`<span class="msg err">${esc(d.error||'Error')}</span>`;btn.disabled=false;return;}
+    const r=await fetch(url,{signal:currentAbort.signal}); const d=await r.json();
+    if(!d.ok){statusEl.innerHTML=`<span class="msg err">${esc(d.error||'Error')}</span>`;return;}
     render(d);
   }catch(e){
-    statusEl.innerHTML=`<span class="msg err">Error de red: ${esc(e.message)}</span>`;
-  }finally{ btn.disabled=false; }
+    if(e.name==="AbortError"){
+      statusEl.innerHTML='<span class="msg info">Búsqueda cancelada.</span>';
+    }else{
+      statusEl.innerHTML=`<span class="msg err">Error de red: ${esc(e.message)}</span>`;
+    }
+  }finally{ currentAbort=null; setSearching(false); }
 }
+
+function cancelarBusqueda(){ if(currentAbort) currentAbort.abort(); }
 
 function galeria(imgs){
   imgs=(imgs||[]).filter(Boolean);
@@ -207,14 +230,37 @@ function render(d){
   // Cómo está en tu PrestaShop
   const ps=d.ps, psbox=$("#psbox");
   if(ps){
+    const ivaPct = (ps.iva_pct!=null && ps.iva_pct!=='') ? Number(ps.iva_pct)
+      : (ps.precio_sin_iva>0 ? (Number(ps.precio)/Number(ps.precio_sin_iva)-1)*100 : 21);
+    const eanPs = esc(ps.ean || d.ean || '');
     psbox.innerHTML=`<div class="psbox">
       ${ps.imagen?`<img src="${esc(ps.imagen)}" onerror="this.style.display='none'">`:''}
-      <div>
+      <div style="flex:1">
         <div class="pslabel">En tu PrestaShop · ${ps.activo?'<span class="tag si">activo</span>':'<span class="tag no">desactivado</span>'}</div>
         <div class="psname">${esc(ps.nombre||'(sin nombre)')}</div>
-        <div class="psprice">${fmt(ps.precio)} <span class="muted" style="font-size:12px">con IVA</span> · ${fmt(ps.precio_sin_iva)} <span class="muted" style="font-size:12px">sin IVA</span></div>
+        <div class="pubopts" data-ean="${eanPs}" data-iva="${ivaPct}">
+          <label class="pubopt">EAN
+            <input type="text" inputmode="numeric" class="ps-ean" value="${eanPs}">
+          </label>
+          <label class="pubopt">Precio con IVA (€)
+            <input type="number" class="ps-precio" min="0" step="0.01" value="${ps.precio!=null?Number(ps.precio).toFixed(2):''}">
+          </label>
+          <label class="pubopt">Precio sin IVA (auto)
+            <input type="number" class="ps-precio-sin" tabindex="-1" readonly value="${ps.precio_sin_iva!=null?Number(ps.precio_sin_iva).toFixed(2):''}">
+          </label>
+          <label class="pubopt">Stock
+            <input type="number" class="ps-stock" min="0" step="1" value="${ps.stock!=null?ps.stock:''}">
+          </label>
+        </div>
+        <div class="psmsg"></div>
+        <button class="pub" style="margin-top:10px;max-width:220px" onclick="guardarPs(this)">Guardar cambios</button>
       </div></div>`;
     psbox.style.display="block";
+    const precioEl=psbox.querySelector(".ps-precio"), sinEl=psbox.querySelector(".ps-precio-sin");
+    precioEl.addEventListener("input", ()=>{
+      const v=parseFloat(precioEl.value);
+      sinEl.value = isFinite(v) ? (v/(1+ivaPct/100)).toFixed(2) : "";
+    });
   }else{ psbox.style.display="none"; psbox.innerHTML=""; }
   const lados=[["azeta",d.azeta],["lider",d.cs]].filter(x=>x[1]);
   statusEl.innerHTML = d.encontrado
@@ -304,6 +350,32 @@ async function publicar(btnEl, proveedor, ean){
   }
 }
 
+async function guardarPs(btnEl){
+  const cont=$("#psbox"), opts=cont.querySelector(".pubopts"), msg=cont.querySelector(".psmsg");
+  const ean=opts.dataset.ean;
+  const ean13=cont.querySelector(".ps-ean").value.trim();
+  const precio=cont.querySelector(".ps-precio").value.trim();
+  const stock=cont.querySelector(".ps-stock").value.trim();
+  if(!ean){ msg.innerHTML='<div class="msg err">Falta el EAN del producto.</div>'; return; }
+  if(ean13==="" && precio==="" && stock===""){ msg.innerHTML='<div class="msg info">Nada que guardar.</div>'; return; }
+  btnEl.disabled=true;
+  msg.innerHTML='<div class="msg info"><span class="spin"></span> Guardando…</div>';
+  try{
+    const r=await fetch(`${BASE}/actualizar`,{method:"POST",headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({ean, ean13:ean13!==""?ean13:null, precio:precio!==""?precio:null, stock:stock!==""?stock:null})});
+    const d=await r.json();
+    if(d.ok){
+      const campos=(d.actualizado||[]).join(', ');
+      msg.innerHTML=`<div class="msg ok">Guardado en PrestaShop${campos?' · '+esc(campos):''}.</div>`;
+      if(d.ean13 && opts) opts.dataset.ean=d.ean13;   // el localizador pasa a ser el nuevo EAN
+    }else{
+      msg.innerHTML=`<div class="msg err">${esc(d.error||'Error al guardar')}</div>`;
+    }
+  }catch(e){
+    msg.innerHTML=`<div class="msg err">Error de red: ${esc(e.message)}</div>`;
+  }finally{ btnEl.disabled=false; }
+}
+
 async function monitorizar(btnEl, proveedor, ean, nombre){
   btnEl.disabled=true; const msg=btnEl.parentElement.querySelector(".monmsg");
   msg.innerHTML='<div class="msg info"><span class="spin"></span> Añadiendo al monitor…</div>';
@@ -316,7 +388,7 @@ async function monitorizar(btnEl, proveedor, ean, nombre){
   }catch(e){ msg.innerHTML=`<div class="msg err">Error de red: ${esc(e.message)}</div>`; btnEl.disabled=false; }
 }
 
-btn.addEventListener("click", buscar);
+btn.addEventListener("click", ()=>{ currentAbort ? cancelarBusqueda() : buscar(); });
 eanEl.addEventListener("keydown", e=>{ if(e.key==="Enter") buscar(); });
 
 // ---- Lector de código de barras (cámara, ZXing) ----
@@ -353,6 +425,7 @@ async function startCam(){
 }
 function stopCam(){ if(reader){try{reader.reset();}catch(e){}} scanning=false; camwrap.style.display="none"; }
 function onCode(code){
+  if(currentAbort) return;               // búsqueda en curso: no aceptar relecturas
   const now=Date.now(); if(code===lastCode && now-lastAt<3000) return;
   lastCode=code; lastAt=now; if(navigator.vibrate) navigator.vibrate(80);
   eanEl.value=code; stopCam(); buscar();
