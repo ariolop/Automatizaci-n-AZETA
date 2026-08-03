@@ -84,8 +84,15 @@ def actualizar():
     if not ean:
         return jsonify({"ok": False, "error": "Falta 'ean'."}), 400
     res = bc.actualizar_prestashop(ean=ean, precio=data.get("precio"),
-                                   stock=data.get("stock"), ean13=data.get("ean13"))
+                                   stock=data.get("stock"), ean13=data.get("ean13"),
+                                   id_impuestos=data.get("id_impuestos"), activo=data.get("activo"))
     return jsonify(res), (200 if res.get("ok") else 400)
+
+
+@app.route("/opciones")
+def opciones():
+    """Listas auxiliares de PrestaShop (impuestos, proveedores) para los desplegables."""
+    return jsonify({"ok": True, **bc.opciones_prestashop()})
 
 
 @app.route("/monitor", methods=["POST"])

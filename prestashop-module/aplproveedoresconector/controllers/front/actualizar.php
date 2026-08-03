@@ -15,7 +15,9 @@
  *     "ean13": "8411...",
  *     "nombre": "Nuevo nombre",
  *     "precio": 12.34,          // precio CON IVA (se guarda el base sin IVA)
- *     "stock": 25               // cantidad disponible (StockAvailable)
+ *     "stock": 25,              // cantidad disponible (StockAvailable)
+ *     "id_impuestos": 1,        // id_tax_rules_group (tipo de impuesto)
+ *     "activo": 1               // 1 = activo, 0 = desactivado
  *   }
  * }
  */
@@ -80,6 +82,17 @@ class AplproveedoresconectorActualizarModuleFrontController extends ModuleFrontC
                 $product->name[(int) $l['id_lang']] = $nombre;
             }
             $cambios[] = 'nombre';
+        }
+        // Estado activo/desactivado
+        if (array_key_exists('activo', $p) && $p['activo'] !== null && $p['activo'] !== '') {
+            $product->active = ((int) $p['activo'] === 1) ? 1 : 0;
+            $cambios[] = 'activo';
+        }
+        // Tipo de impuesto (regla de impuestos). Se aplica ANTES del precio para
+        // que el cálculo del precio base use la tasa nueva.
+        if (array_key_exists('id_impuestos', $p) && $p['id_impuestos'] !== null && $p['id_impuestos'] !== '') {
+            $product->id_tax_rules_group = (int) $p['id_impuestos'];
+            $cambios[] = 'impuestos';
         }
         // Precio: llega CON IVA; se almacena el precio base (sin IVA) según la
         // regla de impuestos del propio producto.

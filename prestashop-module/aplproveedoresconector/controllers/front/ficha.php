@@ -87,6 +87,7 @@ class AplproveedoresconectorFichaModuleFrontController extends ModuleFrontContro
             'precio' => round((float) Product::getPriceStatic($id, true), 2),
             'precio_sin_iva' => round((float) Product::getPriceStatic($id, false), 2),
             'iva_pct' => round((float) $product->getTaxesRate(), 2),
+            'id_impuestos' => (int) $product->id_tax_rules_group,
             'stock' => $stock,
             'imagen' => $imagen,
         ]);

@@ -236,22 +236,41 @@ def _normalizar_modo_venta(valor):
     return m if m in (1, 2, 3) else None
 
 
+def opciones_prestashop() -> dict:
+    """Listas auxiliares de la tienda (proveedores, impuestos) o {} si falla."""
+    if not prestashop_configurado():
+        return {}
+    try:
+        from prestashop_client import PrestashopClient
+        return PrestashopClient().obtener_opciones()
+    except Exception:  # noqa: BLE001
+        return {}
+
+
 def actualizar_prestashop(ean: str | None = None, id_product=None,
-                          precio=None, stock=None, ean13=None) -> dict:
-    """Actualiza EAN13, precio (CON IVA) y/o stock de un producto YA existente en
-    PrestaShop, localizado por EAN actual (o id_product). Devuelve {ok, ...}."""
+                          precio=None, stock=None, ean13=None, id_impuestos=None,
+                          activo=None) -> dict:
+    """Actualiza EAN13, tipo de impuesto, estado (activo), precio (CON IVA) y/o stock
+    de un producto YA existente en PrestaShop, localizado por EAN actual (o id_product)."""
     if not prestashop_configurado():
         return {"ok": False, "error": "PrestaShop no está configurado."}
     if not ean and not id_product:
         return {"ok": False, "error": "Falta 'ean' o 'id_product'."}
 
     cambios: dict = {}
+    if activo is not None and str(activo).strip() != "":
+        cambios["activo"] = 1 if str(activo).strip() in ("1", "true", "True", "on", "si", "sí") else 0
     if ean13 is not None and str(ean13).strip() != "":
         nuevo = "".join(ch for ch in str(ean13) if ch.isdigit())
         if not nuevo:
             return {"ok": False, "error": "EAN no válido."}
         if nuevo != (ean or ""):
             cambios["ean13"] = nuevo
+    if id_impuestos is not None and str(id_impuestos).strip() != "":
+        try:
+            cambios["id_impuestos"] = int(id_impuestos)
+        except (TypeError, ValueError):
+            return {"ok": False, "error": "Impuesto no válido."}
     if precio is not None and str(precio).strip() != "":
         try:
             cambios["precio"] = float(str(precio).replace(",", "."))

@@ -251,6 +251,17 @@ function render(d){
           <label class="pubopt">Stock
             <input type="number" class="ps-stock" min="0" step="1" value="${ps.stock!=null?ps.stock:''}">
           </label>
+          <label class="pubopt">Tipo de impuesto
+            <select class="ps-impuesto" data-actual="${ps.id_impuestos!=null?ps.id_impuestos:''}" disabled>
+              <option>Cargando…</option>
+            </select>
+          </label>
+          <label class="pubopt">Estado
+            <select class="ps-activo" data-orig="${ps.activo?'1':'0'}">
+              <option value="1"${ps.activo?' selected':''}>Activo</option>
+              <option value="0"${!ps.activo?' selected':''}>Desactivado</option>
+            </select>
+          </label>
         </div>
         <div class="psmsg"></div>
         <button class="pub" style="margin-top:10px;max-width:220px" onclick="guardarPs(this)">Guardar cambios</button>
@@ -261,6 +272,7 @@ function render(d){
       const v=parseFloat(precioEl.value);
       sinEl.value = isFinite(v) ? (v/(1+ivaPct/100)).toFixed(2) : "";
     });
+    rellenarImpuestos(psbox.querySelector(".ps-impuesto"));
   }else{ psbox.style.display="none"; psbox.innerHTML=""; }
   const lados=[["azeta",d.azeta],["lider",d.cs]].filter(x=>x[1]);
   statusEl.innerHTML = d.encontrado
@@ -350,24 +362,53 @@ async function publicar(btnEl, proveedor, ean){
   }
 }
 
+// Lista de impuestos de la tienda (se pide una vez y se cachea)
+let impuestosCache=null;
+async function getImpuestos(){
+  if(impuestosCache!==null) return impuestosCache;
+  try{
+    const r=await fetch(`${BASE}/opciones`); const d=await r.json();
+    impuestosCache = (d && Array.isArray(d.impuestos)) ? d.impuestos : [];
+  }catch(e){ impuestosCache=[]; }
+  return impuestosCache;
+}
+async function rellenarImpuestos(sel){
+  if(!sel) return;
+  const actual=sel.dataset.actual;
+  const imps=await getImpuestos();
+  if(!imps.length){ sel.innerHTML='<option value="">(no disponible)</option>'; return; }
+  sel.innerHTML = imps.map(t=>`<option value="${esc(t.id)}"${Number(t.id)===Number(actual)?' selected':''}>${esc(t.nombre)}</option>`).join("");
+  sel.disabled=false;
+}
+
 async function guardarPs(btnEl){
   const cont=$("#psbox"), opts=cont.querySelector(".pubopts"), msg=cont.querySelector(".psmsg");
   const ean=opts.dataset.ean;
   const ean13=cont.querySelector(".ps-ean").value.trim();
   const precio=cont.querySelector(".ps-precio").value.trim();
   const stock=cont.querySelector(".ps-stock").value.trim();
+  const impSel=cont.querySelector(".ps-impuesto");
+  const id_impuestos = (impSel && !impSel.disabled && impSel.value!=="") ? impSel.value : "";
+  const activoSel=cont.querySelector(".ps-activo");
+  const activo = activoSel ? activoSel.value : "";
+  const cambiaActivo = activoSel && String(activoSel.value)!==String(activoSel.dataset.orig??activoSel.value);
   if(!ean){ msg.innerHTML='<div class="msg err">Falta el EAN del producto.</div>'; return; }
-  if(ean13==="" && precio==="" && stock===""){ msg.innerHTML='<div class="msg info">Nada que guardar.</div>'; return; }
+  if(ean13==="" && precio==="" && stock==="" && id_impuestos==="" && !cambiaActivo){
+    msg.innerHTML='<div class="msg info">Nada que guardar.</div>'; return;
+  }
   btnEl.disabled=true;
   msg.innerHTML='<div class="msg info"><span class="spin"></span> Guardando…</div>';
   try{
     const r=await fetch(`${BASE}/actualizar`,{method:"POST",headers:{"Content-Type":"application/json"},
-      body:JSON.stringify({ean, ean13:ean13!==""?ean13:null, precio:precio!==""?precio:null, stock:stock!==""?stock:null})});
+      body:JSON.stringify({ean, ean13:ean13!==""?ean13:null, precio:precio!==""?precio:null,
+        stock:stock!==""?stock:null, id_impuestos:id_impuestos!==""?id_impuestos:null,
+        activo:cambiaActivo?activo:null})});
     const d=await r.json();
     if(d.ok){
       const campos=(d.actualizado||[]).join(', ');
       msg.innerHTML=`<div class="msg ok">Guardado en PrestaShop${campos?' · '+esc(campos):''}.</div>`;
       if(d.ean13 && opts) opts.dataset.ean=d.ean13;   // el localizador pasa a ser el nuevo EAN
+      if(activoSel) activoSel.dataset.orig=activoSel.value;
     }else{
       msg.innerHTML=`<div class="msg err">${esc(d.error||'Error al guardar')}</div>`;
     }
