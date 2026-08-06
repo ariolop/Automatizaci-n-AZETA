@@ -68,6 +68,7 @@ from lote_app import app as lote_mod             # noqa: E402  Lote unificado
 from monitor_app import app as monitor_mod       # noqa: E402  Monitor unificado
 from competencia_app import app as competencia_mod  # noqa: E402  Precios competencia
 from compras_app import app as compras_mod       # noqa: E402  Compras a proveedores
+from etiquetas_app import app as etiquetas_mod   # noqa: E402  Exportar códigos de barras
 from configuracion import app as config_mod      # noqa: E402  Configuración central
 import app as azeta_mod                          # noqa: E402  AZETA (raíz)
 from cspapeleria import app as cs_mod            # noqa: E402  CS Papelería / Liderpapel
@@ -78,6 +79,7 @@ lote_app = lote_mod.app
 monitor_app = monitor_mod.app
 competencia_app = competencia_mod.app
 compras_app = compras_mod.app
+etiquetas_app = etiquetas_mod.app
 config_app = config_mod.app
 azeta_app = azeta_mod.app
 cs_app = cs_mod.app
@@ -105,6 +107,9 @@ APPS = [
     {"slug": "compras", "url": "/compras", "nombre": "Compras",
      "desc": "Registra lo que compras a AZETA y Liderpapel; compara el precio pagado con el actual y detecta lo que falta por añadir.",
      "icon": "🧾"},
+    {"slug": "etiquetas", "url": "/etiquetas", "nombre": "Exportar código de barras",
+     "desc": "Selecciona artículos del catálogo de PrestaShop (con búsqueda y filtros) y genera un PDF imprimible con el código de barras y el nombre de cada uno.",
+     "icon": "🖨️"},
     {"slug": "config",  "url": "/config",  "nombre": "Configuración",
      "desc": "PrestaShop y credenciales de AZETA y Liderpapel, todo en un solo sitio.",
      "icon": "⚙️"},
@@ -160,6 +165,7 @@ _mounted = DispatcherMiddleware(hub, {
     "/monitor": monitor_app,
     "/competencia": competencia_app,
     "/compras": compras_app,
+    "/etiquetas": etiquetas_app,
     "/config": config_app,
     "/azeta": azeta_app,
     "/cs": cs_app,

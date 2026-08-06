@@ -114,6 +114,7 @@
       <th>Proveedor</th><th>EAN</th><th>Nombre</th><th>Estado</th>
       <th class="right">Stock</th><th class="right">Precio neto</th><th class="right">Coste real</th>
       <th style="text-align:center">PrestaShop</th>
+      <th class="right" title="Margen sobre PVP = (PVP con IVA − coste real) / PVP">Margen</th>
       <th>Última revisión</th><th></th>
     </tr></thead>
     <tbody>
@@ -131,6 +132,15 @@
           {% elif v.ean in precios_ps %}<span style="color:var(--ok);font-weight:700" title="PVP en PrestaShop (IVA incl.)">{{ '%.2f €'|format(precios_ps[v.ean]) }}</span>
           {% elif v.ean in en_ps %}<span style="color:var(--ok);font-weight:700" title="En PrestaShop (precio no disponible; actualiza el módulo)">✓</span>
           {% else %}<span style="color:var(--err);font-weight:700" title="No está en PrestaShop">✗</span>{% endif %}
+        </td>
+        {% set _pvp = precios_ps.get(v.ean) %}
+        {% set _coste = v.get('coste_real') %}
+        <td class="right c-margen" data-pvp="{{ '%.4f'|format(_pvp) if _pvp is not none else '' }}">
+          {% if _pvp and _coste and _pvp > 0 %}
+            {% set _m = (_pvp - _coste) / _pvp * 100 %}
+            <span style="font-weight:700;color:{{ 'var(--err)' if _m < 10 else ('var(--warn)' if _m < 25 else 'var(--ok)') }}"
+                  title="PVP {{ '%.2f'|format(_pvp) }} € · coste {{ '%.2f'|format(_coste) }} €">{{ '%.0f%%'|format(_m) }}</span>
+          {% else %}<span class="muted" title="Falta PVP en PrestaShop o coste real">—</span>{% endif %}
         </td>
         <td class="muted c-rev">{{ (v.ultima_revision or '')[:16].replace('T',' ') or '—' }}</td>
         <td class="right" style="white-space:nowrap">
@@ -181,6 +191,17 @@ async function comprobar(btn){
       tr.querySelector('.c-stock').textContent  = (d.stock===null||d.stock===undefined) ? '—' : d.stock;
       tr.querySelector('.c-precio').textContent = fmtEur(d.precio_neto);
       tr.querySelector('.c-coste').textContent  = fmtEur(d.coste_real);
+      const cM = tr.querySelector('.c-margen');
+      if(cM){
+        const pvp = parseFloat(cM.dataset.pvp);
+        if(!isNaN(pvp) && pvp > 0 && d.coste_real != null){
+          const m = (pvp - d.coste_real) / pvp * 100;
+          const col = m < 10 ? 'var(--err)' : (m < 25 ? 'var(--warn)' : 'var(--ok)');
+          cM.innerHTML = `<span style="font-weight:700;color:${col}" title="PVP ${pvp.toFixed(2)} € · coste ${Number(d.coste_real).toFixed(2)} €">${Math.round(m)}%</span>`;
+        }else{
+          cM.innerHTML = '<span class="muted">—</span>';
+        }
+      }
       tr.querySelector('.c-rev').textContent    = (d.ultima_revision||'').slice(0,16).replace('T',' ') || 'ahora';
       btn.style.color = 'var(--ok)';
     }else{

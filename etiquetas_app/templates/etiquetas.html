@@ -1,0 +1,293 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Exportar código de barras · AZETA</title>
+<style>
+  :root{
+    --bg:#0f1216; --panel:#171b21; --panel2:#1e242c; --line:#2a323c;
+    --txt:#e7edf3; --muted:#9aa7b4; --accent:#4f8cff; --ok:#3ecf8e; --warn:#f4c542; --err:#ff6b6b;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--txt);font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif}
+  header{display:flex;align-items:center;gap:14px;padding:16px 20px;border-bottom:1px solid var(--line);flex-wrap:wrap;position:sticky;top:0;background:var(--bg);z-index:30}
+  header h1{font-size:18px;margin:0}
+  header .sp{flex:1}
+  a.lnk,button.lnk{color:var(--muted);text-decoration:none;font-size:13px;border:1px solid var(--line);
+       padding:7px 11px;border-radius:9px;background:var(--panel2);cursor:pointer}
+  a.lnk:hover,button.lnk:hover{color:#fff;border-color:var(--accent)}
+  .wrap{max-width:1240px;margin:0 auto;padding:20px;display:flex;gap:18px;align-items:flex-start}
+  main{flex:1;min-width:0}
+  aside{flex:0 0 300px;position:sticky;top:78px;max-height:calc(100vh - 160px);display:flex;flex-direction:column;
+        background:var(--panel);border:1px solid var(--line);border-radius:12px;overflow:hidden}
+  aside .sh{display:flex;align-items:center;gap:8px;padding:12px 14px;border-bottom:1px solid var(--line)}
+  aside .sh b{font-size:14px} aside .sh .sp{flex:1}
+  aside .sbody{overflow:auto;padding:6px 8px}
+  .grp{margin:6px 4px 10px}
+  .grp .gt{font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--accent);margin:4px 6px 6px;font-weight:700}
+  .selitem{display:flex;align-items:center;gap:8px;padding:6px 8px;border-radius:8px;font-size:13px}
+  .selitem:hover{background:var(--panel2)}
+  .selitem .nm{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .selitem .x{border:none;background:none;color:var(--muted);cursor:pointer;font-size:16px;line-height:1;padding:2px 4px}
+  .selitem .x:hover{color:var(--err)}
+  .svacio{color:var(--muted);font-size:13px;text-align:center;padding:26px 12px}
+  .bar{display:flex;gap:10px;flex-wrap:wrap;align-items:center;background:var(--panel);border:1px solid var(--line);
+       border-radius:12px;padding:12px;margin-bottom:14px}
+  .bar input[type=text],.bar select{padding:9px 10px;border-radius:9px;border:1px solid var(--line);background:var(--panel2);color:var(--txt);font-size:14px}
+  .bar input[type=text]{min-width:200px;flex:1}
+  label.ck{display:inline-flex;gap:5px;align-items:center;color:var(--muted);font-size:14px;white-space:nowrap}
+  .btn{padding:9px 14px;border:none;border-radius:9px;background:var(--accent);color:#fff;font-weight:600;cursor:pointer;font-size:14px}
+  .btn:disabled{opacity:.5;cursor:not-allowed}
+  .btn.sec{background:var(--panel2);color:var(--txt);border:1px solid var(--line)}
+  .warnbox{background:rgba(244,197,66,.12);color:var(--warn);border-radius:10px;padding:12px 14px;margin-bottom:14px;font-size:14px}
+  .errbox{background:rgba(255,107,107,.12);color:var(--err);border-radius:10px;padding:12px 14px;margin-bottom:14px;font-size:14px}
+  table{width:100%;border-collapse:collapse;background:var(--panel);border:1px solid var(--line);border-radius:12px;overflow:hidden}
+  th,td{text-align:left;padding:9px 11px;border-bottom:1px solid var(--line);font-size:13.5px;vertical-align:top}
+  th{color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:.04em;background:var(--panel)}
+  tr:last-child td{border-bottom:none}
+  tbody tr{cursor:pointer}
+  tbody tr:hover{background:var(--panel2)}
+  tbody tr.sel{background:rgba(79,140,255,.12)}
+  .marca{font-size:11.5px;color:var(--muted);margin-top:2px}
+  td.ean{font-variant-numeric:tabular-nums;color:var(--muted)}
+  .badge{font-size:11px;font-weight:600;padding:2px 8px;border-radius:20px}
+  .badge.on{background:rgba(62,207,142,.14);color:var(--ok)}
+  .badge.off{background:rgba(255,107,107,.14);color:var(--err)}
+  .noean{font-size:11px;color:var(--warn)}
+  .right{text-align:right} .muted{color:var(--muted)}
+  .vacio,.cargando{color:var(--muted);text-align:center;padding:36px}
+  .footbar{position:sticky;bottom:0;background:var(--bg);border-top:1px solid var(--line);
+       padding:12px 20px;display:flex;gap:14px;align-items:center;flex-wrap:wrap;z-index:30}
+  @media(max-width:900px){ .wrap{flex-direction:column} aside{flex-basis:auto;width:100%;position:static;max-height:none} }
+</style>
+</head>
+<body>
+<header>
+  <a class="lnk" href="/">☰ Menú</a>
+  <h1>Exportar código de barras</h1>
+  <span class="sp"></span>
+</header>
+
+<div class="wrap">
+  <main>
+    {% if not ps_ok %}
+      <div class="warnbox">PrestaShop no está configurado (faltan PRESTASHOP_URL / PRESTASHOP_TOKEN en <a class="lnk" href="/config">Configuración</a>). No se puede leer el catálogo.</div>
+    {% endif %}
+    <div id="err" class="errbox" style="display:none"></div>
+
+    <div class="bar">
+      <input type="text" id="q" placeholder="Buscar por nombre, marca o EAN…" autocomplete="off">
+      <select id="fEstado">
+        <option value="todos">Todos</option>
+        <option value="activos">Solo activos</option>
+        <option value="inactivos">Solo inactivos</option>
+      </select>
+      <select id="fMarca"><option value="">Todas las marcas</option></select>
+      <label class="ck"><input type="checkbox" id="fConEan" checked> Solo con EAN</label>
+      <button class="btn sec" id="selVis">Seleccionar visibles</button>
+    </div>
+
+    <div id="lista"><div class="cargando" id="cargando">Cargando catálogo…</div></div>
+  </main>
+
+  <aside>
+    <div class="sh"><b>Seleccionados</b> <span class="muted" id="nsel">0</span><span class="sp"></span>
+      <button class="lnk" id="selNone">Quitar todos</button></div>
+    <div class="sbody" id="sbody"><div class="svacio">Aún no has seleccionado nada.<br>Haz clic en las filas del catálogo.</div></div>
+  </aside>
+</div>
+
+<div class="footbar">
+  <label class="ck"><input type="checkbox" id="porMarca" checked> Una hoja por marca</label>
+  <label class="ck">Columnas
+    <select id="cols"><option value="2">2</option><option value="3" selected>3</option><option value="4">4</option></select>
+  </label>
+  <label class="ck"><input type="checkbox" id="borde" checked> Borde de recorte</label>
+  <span class="sp" style="flex:1"></span>
+  <span class="muted"><b id="nsel2">0</b> etiqueta(s)</span>
+  <button class="btn" id="gen" disabled>⤓ Generar PDF</button>
+</div>
+
+<script>
+const $ = s => document.querySelector(s);
+let CATALOGO = [];
+let SEL = new Map();                 // clave -> {ean, nombre, fabricante}
+const clave = p => (p.id ?? '') + '|' + (p.ean13 || '');
+const marcaDe = p => (p.fabricante || '').trim() || 'Sin marca';
+
+// --- Persistencia en el navegador (selección + opciones) --------------------
+const LS_SEL = 'etiquetas_sel_v1', LS_OPT = 'etiquetas_opts_v1';
+function guardarSel(){ try{ localStorage.setItem(LS_SEL, JSON.stringify([...SEL])); }catch(e){} }
+function cargarSel(){ try{ const r=localStorage.getItem(LS_SEL); if(r) SEL=new Map(JSON.parse(r)); }catch(e){} }
+function guardarOpts(){ try{ localStorage.setItem(LS_OPT, JSON.stringify(
+  {cols:$('#cols').value, borde:$('#borde').checked, porMarca:$('#porMarca').checked})); }catch(e){} }
+function cargarOpts(){ try{ const r=localStorage.getItem(LS_OPT); if(!r) return; const o=JSON.parse(r);
+  if(o.cols) $('#cols').value=o.cols;
+  if('borde' in o) $('#borde').checked=o.borde;
+  if('porMarca' in o) $('#porMarca').checked=o.porMarca; }catch(e){} }
+
+function mostrarError(msg){ const e=$('#err'); e.textContent=msg; e.style.display='block'; }
+function escapeHtml(s){ return (s||'').replace(/[&<>"]/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+
+async function cargar(){
+  {% if not ps_ok %} $('#cargando').textContent='—'; return; {% endif %}
+  try{
+    const r = await fetch('api/catalogo');
+    const d = await r.json();
+    if(!d.ok){ mostrarError(d.error||'Error al cargar el catálogo.'); $('#cargando').remove(); return; }
+    CATALOGO = d.productos || [];
+    poblarMarcas();
+    render();
+  }catch(e){ mostrarError('No se pudo cargar el catálogo: '+e); const c=$('#cargando'); if(c) c.remove(); }
+}
+
+function poblarMarcas(){
+  const marcas = [...new Set(CATALOGO.map(marcaDe))].sort((a,b)=>{
+    if(a==='Sin marca') return 1; if(b==='Sin marca') return -1; return a.localeCompare(b);
+  });
+  const sel = $('#fMarca');
+  for(const m of marcas){ const o=document.createElement('option'); o.value=m; o.textContent=m; sel.appendChild(o); }
+}
+
+function filtrar(){
+  const q = $('#q').value.trim().toLowerCase();
+  const est = $('#fEstado').value;
+  const marca = $('#fMarca').value;
+  const conEan = $('#fConEan').checked;
+  return CATALOGO.filter(p => {
+    if(conEan && !(p.ean13 && p.ean13.length)) return false;
+    if(est==='activos' && !p.activo) return false;
+    if(est==='inactivos' && p.activo) return false;
+    if(marca && marcaDe(p)!==marca) return false;
+    if(q){
+      const t = (p.nombre||'').toLowerCase()+' '+(p.fabricante||'').toLowerCase()+' '+(p.ean13||'');
+      if(!t.includes(q)) return false;
+    }
+    return true;
+  });
+}
+
+function render(){
+  const filas = filtrar();
+  const cont = $('#lista');
+  if(!filas.length){ cont.innerHTML = '<div class="vacio">No hay productos que coincidan.</div>'; actualizar(); return; }
+  let html = '<table><thead><tr>'
+    + '<th style="width:34px"><input type="checkbox" id="allVis" title="Seleccionar visibles"></th>'
+    + '<th>Producto</th><th style="width:150px">EAN / código</th>'
+    + '<th style="width:76px">Estado</th><th class="right" style="width:84px">PVP</th></tr></thead><tbody>';
+  for(const p of filas){
+    const k = clave(p);
+    const sel = SEL.has(k) ? ' class="sel"' : '';
+    const chk = SEL.has(k) ? 'checked' : '';
+    const ean = p.ean13 ? `<span>${p.ean13}</span>` : '<span class="noean">sin EAN (Code128)</span>';
+    const est = p.activo ? '<span class="badge on">activo</span>' : '<span class="badge off">inactivo</span>';
+    const pvp = (p.precio!=null) ? Number(p.precio).toFixed(2).replace('.',',')+' €' : '';
+    html += `<tr data-k="${k}"${sel}><td><input type="checkbox" class="rowck" ${chk}></td>`
+      + `<td>${escapeHtml(p.nombre||'')}<div class="marca">${escapeHtml(marcaDe(p))}</div></td>`
+      + `<td class="ean">${ean}</td><td>${est}</td><td class="right muted">${pvp}</td></tr>`;
+  }
+  html += '</tbody></table>';
+  cont.innerHTML = html;
+  actualizar();
+}
+
+function renderSidebar(){
+  const body = $('#sbody');
+  if(!SEL.size){ body.innerHTML = '<div class="svacio">Aún no has seleccionado nada.<br>Haz clic en las filas del catálogo.</div>'; return; }
+  // Agrupar por marca.
+  const grupos = {};
+  for(const [k,v] of SEL){ const m=(v.fabricante||'').trim()||'Sin marca'; (grupos[m]=grupos[m]||[]).push([k,v]); }
+  const marcas = Object.keys(grupos).sort((a,b)=>{ if(a==='Sin marca')return 1; if(b==='Sin marca')return -1; return a.localeCompare(b); });
+  let html='';
+  for(const m of marcas){
+    html += `<div class="grp"><div class="gt">${escapeHtml(m)} · ${grupos[m].length}</div>`;
+    for(const [k,v] of grupos[m]){
+      html += `<div class="selitem" data-k="${k}"><span class="nm" title="${escapeHtml(v.nombre)}">${escapeHtml(v.nombre)}</span>`
+        + `<button class="x" data-rm="${k}" title="Quitar">✕</button></div>`;
+    }
+    html += '</div>';
+  }
+  body.innerHTML = html;
+}
+
+function actualizar(){
+  const n = SEL.size;
+  $('#nsel').textContent = n; $('#nsel2').textContent = n;
+  $('#gen').disabled = (n===0);
+  renderSidebar();
+  guardarSel();
+}
+
+function prodDeClave(k){ return CATALOGO.find(p => clave(p)===k); }
+function selDe(p){ return {ean:p.ean13, nombre:p.nombre, fabricante:p.fabricante||''}; }
+function quitar(k){
+  SEL.delete(k);
+  const tr = document.querySelector(`tr[data-k="${CSS.escape(k)}"]`);
+  if(tr){ tr.classList.remove('sel'); const ck=tr.querySelector('.rowck'); if(ck) ck.checked=false; }
+  actualizar();
+}
+
+// Clic en filas del catálogo.
+$('#lista').addEventListener('click', e => {
+  const tr = e.target.closest('tr[data-k]');
+  if(!tr) return;
+  const k = tr.dataset.k, p = prodDeClave(k);
+  if(!p) return;
+  if(SEL.has(k)) SEL.delete(k); else SEL.set(k, selDe(p));
+  tr.classList.toggle('sel', SEL.has(k));
+  const ck = tr.querySelector('.rowck'); if(ck) ck.checked = SEL.has(k);
+  actualizar();
+  e.preventDefault();
+});
+$('#lista').addEventListener('change', e => {
+  if(e.target.id==='allVis'){
+    const marcar = e.target.checked;
+    for(const p of filtrar()){ const k=clave(p); if(marcar) SEL.set(k,selDe(p)); else SEL.delete(k); }
+    render();
+  }
+});
+
+// Quitar desde la barra lateral.
+$('#sbody').addEventListener('click', e => {
+  const b = e.target.closest('[data-rm]'); if(!b) return;
+  quitar(b.getAttribute('data-rm'));
+});
+
+$('#q').addEventListener('input', render);
+$('#fEstado').addEventListener('change', render);
+$('#fMarca').addEventListener('change', render);
+$('#fConEan').addEventListener('change', render);
+$('#selVis').addEventListener('click', () => { for(const p of filtrar()) SEL.set(clave(p),selDe(p)); render(); });
+$('#selNone').addEventListener('click', () => { SEL.clear(); render(); });
+
+$('#cols').addEventListener('change', guardarOpts);
+$('#borde').addEventListener('change', guardarOpts);
+$('#porMarca').addEventListener('change', guardarOpts);
+
+$('#gen').addEventListener('click', async () => {
+  if(!SEL.size) return;
+  const items = [...SEL.values()];
+  const btn = $('#gen'); btn.disabled = true; const txt = btn.textContent; btn.textContent = 'Generando…';
+  try{
+    const r = await fetch('pdf', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({items, columnas:+$('#cols').value, borde:$('#borde').checked, por_marca:$('#porMarca').checked})
+    });
+    if(!r.ok){ const d = await r.json().catch(()=>({})); mostrarError(d.error||'No se pudo generar el PDF.'); return; }
+    const blob = await r.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = 'etiquetas.pdf'; document.body.appendChild(a); a.click(); a.remove();
+    URL.revokeObjectURL(url);
+  }catch(e){ mostrarError('Error al generar el PDF: '+e); }
+  finally{ btn.textContent = txt; actualizar(); }
+});
+
+cargarOpts();
+cargarSel();
+actualizar();   // muestra los seleccionados guardados aunque el catálogo tarde
+cargar();
+</script>
+</body>
+</html>

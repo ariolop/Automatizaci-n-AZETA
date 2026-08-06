@@ -1,7 +1,7 @@
 <?php
 /**
  * Front controller: listado
- * Devuelve los productos de la tienda (id, ean13, nombre, activo) para el monitor.
+ * Devuelve los productos de la tienda (id, ean13, nombre, fabricante, activo).
  *
  * Endpoint:
  *   {shop}/index.php?fc=module&module=aplproveedoresconector&controller=listado
@@ -37,17 +37,19 @@ class AplproveedoresconectorListadoModuleFrontController extends ModuleFrontCont
         $idLang = (int) Configuration::get('PS_LANG_DEFAULT');
         $soloConEan = !isset($in['solo_con_ean']) || $in['solo_con_ean'];
 
-        $sql = 'SELECT p.id_product, p.ean13, p.active, pl.name
+        $sql = 'SELECT p.id_product, p.ean13, p.active, pl.name, m.name AS fabricante
                 FROM ' . _DB_PREFIX_ . 'product p
                 JOIN ' . _DB_PREFIX_ . 'product_lang pl
-                  ON pl.id_product = p.id_product AND pl.id_lang = ' . $idLang;
+                  ON pl.id_product = p.id_product AND pl.id_lang = ' . $idLang . '
+                LEFT JOIN ' . _DB_PREFIX_ . 'manufacturer m
+                  ON m.id_manufacturer = p.id_manufacturer';
         if (Shop::isFeatureActive()) {
             $sql .= ' AND pl.id_shop = ' . (int) Context::getContext()->shop->id;
         }
         if ($soloConEan) {
             $sql .= " WHERE p.ean13 <> ''";
         }
-        $sql .= ' GROUP BY p.id_product ORDER BY pl.name';
+        $sql .= ' GROUP BY p.id_product ORDER BY m.name, pl.name';
 
         $incluirPrecio = !isset($in['precio']) || $in['precio'];  // por defecto, incluir PVP
         $rows = Db::getInstance()->executeS($sql);
@@ -57,6 +59,7 @@ class AplproveedoresconectorListadoModuleFrontController extends ModuleFrontCont
                 'id' => (int) $r['id_product'],
                 'ean13' => $r['ean13'],
                 'nombre' => $r['name'],
+                'fabricante' => $r['fabricante'] !== null ? $r['fabricante'] : '',
                 'activo' => (int) $r['active'] === 1,
             ];
             if ($incluirPrecio) {
