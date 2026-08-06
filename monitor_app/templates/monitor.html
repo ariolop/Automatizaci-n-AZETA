@@ -36,6 +36,10 @@
   table{width:100%;border-collapse:collapse;background:var(--panel);border:1px solid var(--line);border-radius:12px;overflow:hidden}
   th,td{text-align:left;padding:9px 11px;border-bottom:1px solid var(--line);font-size:13.5px}
   th{color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:.04em}
+  th.sortable{cursor:pointer;user-select:none;white-space:nowrap}
+  th.sortable:hover{color:var(--txt)}
+  th.sortable .arrow{font-size:9px;margin-left:3px;opacity:.35}
+  th.sortable.asc .arrow,th.sortable.desc .arrow{opacity:1;color:var(--accent)}
   tr:last-child td{border-bottom:none}
   .tag{font-size:11px;font-weight:700;padding:2px 8px;border-radius:20px}
   .tag.AZETA{background:rgba(79,140,255,.16);color:var(--azeta)}
@@ -46,6 +50,9 @@
   .est.desaparecido{background:rgba(255,107,107,.14);color:var(--err)}
   .est.desconocido,.est{background:var(--panel2);color:var(--muted)}
   .muted{color:var(--muted)} .right{text-align:right}
+  td.c-ps.editable{cursor:pointer} td.c-ps.editable:hover{outline:1px dashed var(--accent);outline-offset:-3px;border-radius:6px}
+  .ped{display:inline-flex;gap:4px;align-items:center;justify-content:center}
+  .ped input{width:70px;padding:4px 6px;border-radius:7px;border:1px solid var(--line);background:var(--panel2);color:var(--txt);font-size:13px;text-align:right}
   .icon{background:none;border:none;color:var(--muted);cursor:pointer;font-size:13px;text-decoration:underline}
   .vacio{color:var(--muted);text-align:center;padding:36px}
   .warnbox{background:rgba(244,197,66,.12);color:var(--warn);border-radius:10px;padding:12px 14px;margin-bottom:14px;font-size:14px}
@@ -109,13 +116,19 @@
   </form>
 
   {% if vigilados %}
-  <table>
+  <table id="tabla">
     <thead><tr>
-      <th>Proveedor</th><th>EAN</th><th>Nombre</th><th>Estado</th>
-      <th class="right">Stock</th><th class="right">Precio neto</th><th class="right">Coste real</th>
-      <th style="text-align:center">PrestaShop</th>
-      <th class="right" title="Margen sobre PVP = (PVP con IVA − coste real) / PVP">Margen</th>
-      <th>Última revisión</th><th></th>
+      <th class="sortable" data-type="text">Proveedor<span class="arrow">↕</span></th>
+      <th class="sortable" data-type="num">EAN<span class="arrow">↕</span></th>
+      <th class="sortable" data-type="text">Nombre<span class="arrow">↕</span></th>
+      <th class="sortable" data-type="text">Estado<span class="arrow">↕</span></th>
+      <th class="sortable right" data-type="num">Stock<span class="arrow">↕</span></th>
+      <th class="sortable right" data-type="num">Precio neto<span class="arrow">↕</span></th>
+      <th class="sortable right" data-type="num">Coste real<span class="arrow">↕</span></th>
+      <th class="sortable" data-type="num" style="text-align:center">PrestaShop<span class="arrow">↕</span></th>
+      <th class="sortable right" data-type="num" title="Margen sobre PVP = (PVP con IVA − coste real) / PVP">Margen<span class="arrow">↕</span></th>
+      <th class="sortable" data-type="date">Última revisión<span class="arrow">↕</span></th>
+      <th></th>
     </tr></thead>
     <tbody>
     {% for v in vigilados %}
@@ -127,7 +140,8 @@
         <td class="right c-stock">{{ v.get('stock') if v.get('stock') is not none else '—' }}</td>
         <td class="right c-precio">{{ '%.2f €'|format(v.get('precio_neto')) if v.get('precio_neto') is not none else '—' }}</td>
         <td class="right c-coste">{{ '%.2f €'|format(v.get('coste_real')) if v.get('coste_real') is not none else '—' }}</td>
-        <td class="c-ps" style="text-align:center">
+        {% set _en_tienda = (en_ps is not none) and (v.ean in en_ps) %}
+        <td class="c-ps{{ ' editable' if _en_tienda }}" style="text-align:center"{{ ' title="Clic para cambiar el PVP en PrestaShop"'|safe if _en_tienda }}>
           {% if en_ps is none %}<span class="muted" title="PrestaShop no disponible">—</span>
           {% elif v.ean in precios_ps %}<span style="color:var(--ok);font-weight:700" title="PVP en PrestaShop (IVA incl.)">{{ '%.2f €'|format(precios_ps[v.ean]) }}</span>
           {% elif v.ean in en_ps %}<span style="color:var(--ok);font-weight:700" title="En PrestaShop (precio no disponible; actualiza el módulo)">✓</span>
@@ -176,8 +190,109 @@
 </main>
 <script>
 const BASE = "{{ request.script_root }}";
+
+// --- Ordenación de columnas (sobre las filas de la página actual) -----------
+(function(){
+  const tabla = document.getElementById('tabla');
+  if(!tabla) return;
+  const ths = [...tabla.querySelectorAll('th.sortable')];
+
+  function valor(td, tipo){
+    const t = (td ? td.textContent : '').trim();
+    if(tipo === 'num'){
+      if(!t || t === '—') return null;
+      const limpio = t.replace(/[^0-9,.\-]/g,'').replace(/\.(?=\d{3}(\D|$))/g,'').replace(',', '.');
+      const n = parseFloat(limpio);
+      return isNaN(n) ? null : n;
+    }
+    if(tipo === 'date'){ return (!t || t === '—') ? null : t; }
+    return t.toLowerCase();
+  }
+
+  function ordenar(idx, tipo, dir){
+    const tbody = tabla.querySelector('tbody');
+    const filas = [...tbody.querySelectorAll('tr')];
+    filas.sort((a,b)=>{
+      const va = valor(a.children[idx], tipo), vb = valor(b.children[idx], tipo);
+      if(va === null && vb === null) return 0;
+      if(va === null) return 1;          // vacíos siempre al final
+      if(vb === null) return -1;
+      let c = (tipo === 'num') ? (va - vb) : (va < vb ? -1 : va > vb ? 1 : 0);
+      return dir === 'asc' ? c : -c;
+    });
+    filas.forEach(f => tbody.appendChild(f));
+  }
+
+  ths.forEach(th => {
+    th.addEventListener('click', () => {
+      const idx = [...th.parentNode.children].indexOf(th);
+      const tipo = th.dataset.type || 'text';
+      const dir = th.classList.contains('asc') ? 'desc' : 'asc';
+      ths.forEach(o => o.classList.remove('asc','desc'));
+      th.classList.add(dir);
+      ordenar(idx, tipo, dir);
+    });
+  });
+})();
+
 const fmtEur = n => (n===null||n===undefined) ? '—'
   : Number(n).toLocaleString('es-ES',{minimumFractionDigits:2,maximumFractionDigits:2})+' €';
+
+// --- Edición del PVP en PrestaShop desde la columna PrestaShop --------------
+function parseNum(txt){
+  const m = (txt||'').replace(/[^0-9,.\-]/g,'').replace(/\.(?=\d{3}(\D|$))/g,'').replace(',', '.');
+  const n = parseFloat(m); return isNaN(n) ? null : n;
+}
+function recomputarMargen(tr, pvp){
+  const cM = tr.querySelector('.c-margen'); if(!cM) return;
+  cM.dataset.pvp = (pvp!=null) ? pvp : '';
+  const coste = parseNum(tr.querySelector('.c-coste') ? tr.querySelector('.c-coste').textContent : '');
+  if(pvp!=null && pvp>0 && coste!=null){
+    const m = (pvp - coste)/pvp*100;
+    const col = m<10?'var(--err)':(m<25?'var(--warn)':'var(--ok)');
+    cM.innerHTML = `<span style="font-weight:700;color:${col}" title="PVP ${pvp.toFixed(2)} € · coste ${coste.toFixed(2)} €">${Math.round(m)}%</span>`;
+  }else{ cM.innerHTML = '<span class="muted">—</span>'; }
+}
+function editarPrecio(cell){
+  if(cell.querySelector('input')) return;                 // ya en edición
+  const tr = cell.closest('tr'); const ean = tr.dataset.ean;
+  const prev = cell.innerHTML;
+  const actual = parseNum(cell.textContent);
+  cell.innerHTML = `<span class="ped"><input type="text" inputmode="decimal" value="${actual!=null?actual.toFixed(2):''}">`
+    + `<button class="icon" data-save title="Guardar">✓</button>`
+    + `<button class="icon" data-cancel title="Cancelar">✕</button></span>`;
+  const inp = cell.querySelector('input'); inp.focus(); inp.select();
+  const cancelar = () => { cell.innerHTML = prev; };
+  const guardar = async () => {
+    const val = inp.value.trim().replace(',', '.');
+    if(!val || isNaN(parseFloat(val)) || parseFloat(val) < 0){ inp.style.borderColor = 'var(--err)'; return; }
+    cell.innerHTML = '<span class="spin"></span>';
+    try{
+      const r = await fetch(`${BASE}/actualizar-precio`, {method:'POST',
+        headers:{'Content-Type':'application/json'}, body:JSON.stringify({ean, precio:val})});
+      const d = await r.json();
+      if(d.ok){
+        const pvp = Number(d.precio);
+        cell.innerHTML = `<span style="color:var(--ok);font-weight:700" title="PVP en PrestaShop (IVA incl.)">${fmtEur(pvp)}</span>`;
+        cell.classList.add('editable'); cell.title = 'Clic para cambiar el PVP en PrestaShop';
+        recomputarMargen(tr, pvp);
+      }else{ cell.innerHTML = prev; alert(d.error || 'No se pudo actualizar el precio.'); }
+    }catch(e){ cell.innerHTML = prev; alert('Error: ' + e.message); }
+  };
+  cell.querySelector('[data-cancel]').onclick = cancelar;
+  cell.querySelector('[data-save]').onclick = guardar;
+  inp.addEventListener('keydown', ev => {
+    if(ev.key === 'Escape') cancelar();
+    if(ev.key === 'Enter'){ ev.preventDefault(); guardar(); }
+  });
+}
+(function(){
+  const tabla = document.getElementById('tabla'); if(!tabla) return;
+  tabla.addEventListener('click', e => {
+    const cell = e.target.closest('td.c-ps.editable');
+    if(cell && !e.target.closest('.ped')) editarPrecio(cell);
+  });
+})();
 
 async function comprobar(btn){
   const tr = btn.closest('tr'); const ean = tr.dataset.ean, prov = tr.dataset.prov;
@@ -191,8 +306,28 @@ async function comprobar(btn){
       tr.querySelector('.c-stock').textContent  = (d.stock===null||d.stock===undefined) ? '—' : d.stock;
       tr.querySelector('.c-precio').textContent = fmtEur(d.precio_neto);
       tr.querySelector('.c-coste').textContent  = fmtEur(d.coste_real);
+
+      // PrestaShop: refresca la columna con el estado/PVP recién consultado.
+      const cPs = tr.querySelector('.c-ps');
+      if(cPs){
+        const enTienda = !!d.ps_en_tienda;
+        cPs.classList.toggle('editable', enTienda);
+        if(enTienda) cPs.title = 'Clic para cambiar el PVP en PrestaShop'; else cPs.removeAttribute('title');
+        if(d.ps_en_tienda === null || d.ps_en_tienda === undefined){
+          cPs.innerHTML = '<span class="muted" title="PrestaShop no disponible">—</span>';
+        } else if(d.ps_pvp != null){
+          cPs.innerHTML = `<span style="color:var(--ok);font-weight:700" title="PVP en PrestaShop (IVA incl.)">${fmtEur(d.ps_pvp)}</span>`;
+        } else if(d.ps_en_tienda){
+          cPs.innerHTML = '<span style="color:var(--ok);font-weight:700" title="En PrestaShop (precio no disponible; actualiza el módulo)">✓</span>';
+        } else {
+          cPs.innerHTML = '<span style="color:var(--err);font-weight:700" title="No está en PrestaShop">✗</span>';
+        }
+      }
+
+      // Margen en vivo con el PVP recién consultado y el nuevo coste.
       const cM = tr.querySelector('.c-margen');
       if(cM){
+        cM.dataset.pvp = (d.ps_pvp != null) ? d.ps_pvp : '';
         const pvp = parseFloat(cM.dataset.pvp);
         if(!isNaN(pvp) && pvp > 0 && d.coste_real != null){
           const m = (pvp - d.coste_real) / pvp * 100;

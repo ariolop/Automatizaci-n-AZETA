@@ -72,12 +72,46 @@ def comprobar_uno():
         r = mon.comprobar_uno(ean, proveedor)
         if r.get("error"):
             return jsonify({"ok": False, "error": r["error"]})
+
+        # PrestaShop: PVP actual de este EAN (para refrescar columna y margen en vivo).
+        # ps_en_tienda = True/False si PrestaShop respondió; None si no está disponible.
+        ps_pvp = None
+        ps_en_tienda = None
+        if bc.prestashop_configurado():
+            try:
+                from prestashop_client import PrestashopClient
+                existentes = PrestashopClient().comprobar_eans([ean]) or {}
+                ps_en_tienda = ean in existentes
+                if ps_en_tienda and isinstance(existentes.get(ean), dict):
+                    ps_pvp = existentes[ean].get("precio")
+            except Exception:  # noqa: BLE001  (PrestaShop caído/mantenimiento)
+                ps_en_tienda = None
+
         from datetime import datetime, timezone
         return jsonify({"ok": True, "estado": r.get("estado"), "stock": r.get("stock"),
                         "precio_neto": r.get("precio_neto"), "coste_real": r.get("coste_real"),
+                        "ps_pvp": ps_pvp, "ps_en_tienda": ps_en_tienda,
                         "ultima_revision": datetime.now(timezone.utc).isoformat()})
     except Exception as e:  # noqa: BLE001
         return jsonify({"ok": False, "error": str(e)})
+
+
+@app.route("/actualizar-precio", methods=["POST"])
+def actualizar_precio():
+    """Cambia el PVP (con IVA) de un producto en PrestaShop, localizado por EAN."""
+    data = request.get_json(silent=True) or {}
+    ean = (data.get("ean") or "").strip()
+    precio = data.get("precio")
+    if not ean or precio in (None, ""):
+        return jsonify({"ok": False, "error": "Faltan 'ean' y/o 'precio'."}), 400
+    res = bc.actualizar_prestashop(ean=ean, precio=precio)
+    if not res.get("ok"):
+        return jsonify(res), 400
+    try:
+        pvp = round(float(str(precio).replace(",", ".")), 2)
+    except (TypeError, ValueError):
+        pvp = None
+    return jsonify({"ok": True, "precio": pvp})
 
 
 @app.route("/cambiar-proveedor", methods=["POST"])
