@@ -8,7 +8,7 @@
   :root{
     --bg:#0f1216; --panel:#171b21; --panel2:#1e242c; --line:#2a323c;
     --txt:#e7edf3; --muted:#9aa7b4; --accent:#4f8cff; --ok:#3ecf8e; --warn:#f4c542; --err:#ff6b6b;
-    --azeta:#4f8cff; --lider:#5aa832;
+    --orange:#ff9f43; --azeta:#4f8cff; --lider:#5aa832;
   }
   *{box-sizing:border-box}
   body{margin:0;background:var(--bg);color:var(--txt);font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif}
@@ -34,13 +34,19 @@
   .flash.ok{background:rgba(62,207,142,.12);color:var(--ok)} .flash.warn{background:rgba(244,197,66,.14);color:var(--warn)}
   .flash.error{background:rgba(255,107,107,.12);color:var(--err)}
   table{width:100%;border-collapse:collapse;background:var(--panel);border:1px solid var(--line);border-radius:12px;overflow:hidden}
-  th,td{text-align:left;padding:9px 11px;border-bottom:1px solid var(--line);font-size:13.5px}
-  th{color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:.04em}
-  th.sortable{cursor:pointer;user-select:none;white-space:nowrap}
+  th,td{text-align:left;padding:10px 12px;border-bottom:1px solid var(--line);font-size:13.5px}
+  th{color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:.04em;white-space:nowrap}
+  th.sortable{cursor:pointer;user-select:none}
   th.sortable:hover{color:var(--txt)}
   th.sortable .arrow{font-size:9px;margin-left:3px;opacity:.35}
   th.sortable.asc .arrow,th.sortable.desc .arrow{opacity:1;color:var(--accent)}
+  tbody tr:nth-child(even){background:rgba(255,255,255,.02)}
+  tbody tr:hover{background:rgba(79,140,255,.08)}
+  td.right{font-variant-numeric:tabular-nums}
+  td:first-child,th:first-child{padding-left:16px} td:last-child,th:last-child{padding-right:16px}
   tr:last-child td{border-bottom:none}
+  .leyenda{display:flex;gap:16px;flex-wrap:wrap;align-items:center;margin:12px 2px 0;font-size:12.5px;color:var(--muted)}
+  .leyenda i{display:inline-block;width:10px;height:10px;border-radius:3px;margin-right:5px;vertical-align:-1px}
   .tag{font-size:11px;font-weight:700;padding:2px 8px;border-radius:20px}
   .tag.AZETA{background:rgba(79,140,255,.16);color:var(--azeta)}
   .tag.Liderpapel{background:rgba(90,168,50,.18);color:#8fd15a}
@@ -53,7 +59,10 @@
   td.c-ps.editable{cursor:pointer} td.c-ps.editable:hover{outline:1px dashed var(--accent);outline-offset:-3px;border-radius:6px}
   .ped{display:inline-flex;gap:4px;align-items:center;justify-content:center}
   .ped input{width:70px;padding:4px 6px;border-radius:7px;border:1px solid var(--line);background:var(--panel2);color:var(--txt);font-size:13px;text-align:right}
-  .icon{background:none;border:none;color:var(--muted);cursor:pointer;font-size:13px;text-decoration:underline}
+  .icon{background:none;border:none;color:var(--muted);cursor:pointer;font-size:12.5px;text-decoration:none;padding:4px 7px;border-radius:7px;transition:.12s}
+  .icon:hover{color:#fff;background:var(--panel2)}
+  td.acciones{white-space:nowrap;text-align:right}
+  td.acciones form{display:inline;margin:0}
   .vacio{color:var(--muted);text-align:center;padding:36px}
   .warnbox{background:rgba(244,197,66,.12);color:var(--warn);border-radius:10px;padding:12px 14px;margin-bottom:14px;font-size:14px}
 </style>
@@ -152,12 +161,13 @@
         <td class="right c-margen" data-pvp="{{ '%.4f'|format(_pvp) if _pvp is not none else '' }}">
           {% if _pvp and _coste and _pvp > 0 %}
             {% set _m = (_pvp - _coste) / _pvp * 100 %}
-            <span style="font-weight:700;color:{{ 'var(--err)' if _m < 10 else ('var(--warn)' if _m < 25 else 'var(--ok)') }}"
+            {% set _col = 'var(--ok)' if _m >= 45 else ('var(--warn)' if _m >= 35 else ('var(--orange)' if _m >= 25 else 'var(--err)')) %}
+            <span style="font-weight:700;color:{{ _col }}"
                   title="PVP {{ '%.2f'|format(_pvp) }} € · coste {{ '%.2f'|format(_coste) }} €">{{ '%.0f%%'|format(_m) }}</span>
           {% else %}<span class="muted" title="Falta PVP en PrestaShop o coste real">—</span>{% endif %}
         </td>
         <td class="muted c-rev">{{ (v.ultima_revision or '')[:16].replace('T',' ') or '—' }}</td>
-        <td class="right" style="white-space:nowrap">
+        <td class="acciones">
           <a class="icon" href="{{ request.script_root }}/editar?ean={{ v.ean }}&proveedor={{ v.proveedor }}" title="Editar">editar</a>
           <button class="icon btn-check" type="button" title="Comprobar ahora" onclick="comprobar(this)">↻</button>
           <form method="post" action="{{ request.script_root }}/cambiar-proveedor" style="display:inline;margin:0"
@@ -176,6 +186,13 @@
     {% endfor %}
     </tbody>
   </table>
+  <div class="leyenda">
+    <span>Margen sobre venta:</span>
+    <span><i style="background:var(--ok)"></i>Excelente ≥ 45 %</span>
+    <span><i style="background:var(--warn)"></i>Correcto 35–45 %</span>
+    <span><i style="background:var(--orange)"></i>Justo 25–35 %</span>
+    <span><i style="background:var(--err)"></i>Bajo &lt; 25 %</span>
+  </div>
   {% set qs = '&q=' ~ (q|urlencode) ~ '&proveedor=' ~ filtro_proveedor ~ '&estado=' ~ filtro_estado %}
   <div class="bar" style="justify-content:space-between;margin-top:14px">
     <span class="muted">Página {{ pag.pagina }} de {{ pag.paginas or 1 }} · {{ pag.total }} vigilados en total</span>
@@ -237,6 +254,8 @@ const BASE = "{{ request.script_root }}";
 
 const fmtEur = n => (n===null||n===undefined) ? '—'
   : Number(n).toLocaleString('es-ES',{minimumFractionDigits:2,maximumFractionDigits:2})+' €';
+// Margen sobre venta: ≥45% excelente, 35–45% correcto, 25–35% justo, <25% bajo.
+const colorMargen = m => m>=45 ? 'var(--ok)' : m>=35 ? 'var(--warn)' : m>=25 ? 'var(--orange)' : 'var(--err)';
 
 // --- Edición del PVP en PrestaShop desde la columna PrestaShop --------------
 function parseNum(txt){
@@ -249,8 +268,7 @@ function recomputarMargen(tr, pvp){
   const coste = parseNum(tr.querySelector('.c-coste') ? tr.querySelector('.c-coste').textContent : '');
   if(pvp!=null && pvp>0 && coste!=null){
     const m = (pvp - coste)/pvp*100;
-    const col = m<10?'var(--err)':(m<25?'var(--warn)':'var(--ok)');
-    cM.innerHTML = `<span style="font-weight:700;color:${col}" title="PVP ${pvp.toFixed(2)} € · coste ${coste.toFixed(2)} €">${Math.round(m)}%</span>`;
+    cM.innerHTML = `<span style="font-weight:700;color:${colorMargen(m)}" title="PVP ${pvp.toFixed(2)} € · coste ${coste.toFixed(2)} €">${Math.round(m)}%</span>`;
   }else{ cM.innerHTML = '<span class="muted">—</span>'; }
 }
 function editarPrecio(cell){
@@ -331,8 +349,7 @@ async function comprobar(btn){
         const pvp = parseFloat(cM.dataset.pvp);
         if(!isNaN(pvp) && pvp > 0 && d.coste_real != null){
           const m = (pvp - d.coste_real) / pvp * 100;
-          const col = m < 10 ? 'var(--err)' : (m < 25 ? 'var(--warn)' : 'var(--ok)');
-          cM.innerHTML = `<span style="font-weight:700;color:${col}" title="PVP ${pvp.toFixed(2)} € · coste ${Number(d.coste_real).toFixed(2)} €">${Math.round(m)}%</span>`;
+          cM.innerHTML = `<span style="font-weight:700;color:${colorMargen(m)}" title="PVP ${pvp.toFixed(2)} € · coste ${Number(d.coste_real).toFixed(2)} €">${Math.round(m)}%</span>`;
         }else{
           cM.innerHTML = '<span class="muted">—</span>';
         }
