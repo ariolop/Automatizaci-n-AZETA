@@ -112,6 +112,7 @@ def norm_cs(d: dict) -> dict:
         "nombre": d.get("nombre"),
         "ean": d.get("ean"),
         "marca": d.get("marca"),
+        "referencia": d.get("referencia"),
         "disponible": d.get("disponible"),
         "situacion": None,
         "stock": d.get("stock"),

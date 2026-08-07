@@ -92,6 +92,15 @@ def parsear_ficha(html, cod_product, base):
     m = re.search(r"marca\s*</td>\s*<td[^>]*>(.*?)</td>", html, re.S | re.I)
     d["marca"] = unescape(_txt(m.group(1))) if m else None
 
+    # Referencia del artículo. Suele venir como fila de tabla
+    # ("referencia</td><td>...") o como texto "Ref: ...".
+    m = re.search(r"(?:referencia|ref\.?)\s*</td>\s*<td[^>]*>(.*?)</td>", html, re.S | re.I)
+    if not m:
+        # Requiere una etiqueta clara ("referencia", "ref." o "ref:") para no
+        # capturar cualquier "ref" del HTML (p. ej. "referrer").
+        m = re.search(r"\bref(?:erencia|\.|:)\s*[:.]?\s*(?:</[^>]+>\s*)?([A-Za-z0-9][A-Za-z0-9 .\-/]{1,28})", html, re.I)
+    d["referencia"] = unescape(_txt(m.group(1))).strip() if m else None
+
     # EANs (pestaña Logística): distingue el EAN de la UNIDAD del EAN de la
     # CAJA/embalaje (compra recomendada, CRC). Por eso a veces hay varios.
     log = re.search(r'id="contentTabLogistica".*?(?=id="contentTab|Comprados juntos|<footer)', html, re.S | re.I)

@@ -296,6 +296,7 @@ function render(d){
     const kv = [];
     kv.push(["EAN", esc(p.ean||"—")]);
     if(p.marca) kv.push(["Marca", esc(p.marca)]);
+    if(p.referencia) kv.push(["Referencia", esc(p.referencia)]);
     kv.push(["Precio neto", fmt(p.precio_neto)]);
     if(p.stock!=null) kv.push(["Stock", esc(p.stock)]);
     if(p.disponible!=null) kv.push(["Disponible", p.disponible?"Sí":"No"]);
