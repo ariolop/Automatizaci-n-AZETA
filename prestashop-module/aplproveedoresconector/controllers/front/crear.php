@@ -1,7 +1,9 @@
 <?php
 /**
  * Front controller: crear
- * Crea un producto DESACTIVADO a partir del JSON enviado por la app AZETA Manager.
+ * Crea un producto a partir del JSON enviado por la app AZETA Manager. Por
+ * defecto se crea DESACTIVADO; se puede crear activo con "activo": true, y fijar
+ * el PVP (precio de venta CON IVA) con "precio_venta_con_iva".
  *
  * Endpoint:
  *   {shop}/index.php?fc=module&module=aplproveedoresconector&controller=crear
@@ -109,11 +111,20 @@ class AplproveedoresconectorCrearModuleFrontController extends ModuleFrontContro
             $costeReal = isset($p['coste_real']) ? (float) $p['coste_real'] : $precioUnidad;
             $product->wholesale_price = $costeReal;
 
-            // Precio de venta: el PVP CON IVA = coste x MARGEN. PrestaShop almacena
-            // el precio base (sin IVA), así que lo convertimos con el tipo de impuesto.
+            // Precio de venta (SIN IVA), que es lo que almacena PrestaShop.
+            // Prioridad: 1) precio indicado a mano; 2) PVP = coste x MARGEN convertido
+            // a base sin IVA; 3) PVP recomendado o precio sin IVA del proveedor.
             $MARGEN_PVP = 1.5;
             $tasaIva = $this->tasaImpuesto($idImpuestos);   // % (p. ej. 21.0)
-            if ($costeReal > 0) {
+            // Precio de venta introducido a mano: viene CON IVA (PVP). PrestaShop
+            // guarda el precio base (sin IVA), así que lo convertimos con el tipo.
+            $pvpConIvaManual = (isset($p['precio_venta_con_iva']) && $p['precio_venta_con_iva'] !== '' && $p['precio_venta_con_iva'] !== null)
+                ? (float) $p['precio_venta_con_iva'] : null;
+            if ($pvpConIvaManual !== null && $pvpConIvaManual > 0) {
+                $product->price = $tasaIva > 0
+                    ? round($pvpConIvaManual / (1 + $tasaIva / 100), 6)
+                    : round($pvpConIvaManual, 6);
+            } elseif ($costeReal > 0) {
                 $pvpConIva = $costeReal * $MARGEN_PVP;
                 $product->price = $tasaIva > 0
                     ? round($pvpConIva / (1 + $tasaIva / 100), 6)
@@ -126,7 +137,10 @@ class AplproveedoresconectorCrearModuleFrontController extends ModuleFrontContro
 
             $product->id_category_default = $idCategoria;
             $product->ean13 = $ean;
-            $product->active = 0;            // <<< DESACTIVADO
+            // Activo opcional: por defecto se crea DESACTIVADO; si llega activo=true
+            // (o 1), se crea ya activado.
+            $activo = filter_var($p['activo'] ?? false, FILTER_VALIDATE_BOOLEAN) ? 1 : 0;
+            $product->active = $activo;
             // Si AZETA NO permite dropshipping, desactivamos "Disponible para pedido"
             $permiteDs = !isset($p['dropshipping']) || (bool) $p['dropshipping'];
             $product->available_for_order = $permiteDs ? 1 : 0;
@@ -189,7 +203,7 @@ class AplproveedoresconectorCrearModuleFrontController extends ModuleFrontContro
                 'imagenes_recibidas' => count($imagenes),
                 'imagenes_subidas' => $imgOk,
                 'imagenes_diag' => $imgDiag,
-                'activo' => false,
+                'activo' => (bool) $activo,
                 'disponible_para_pedido' => (bool) $permiteDs,
                 'stock' => $stockFijado,
                 'modo_venta' => $modoAplicado,

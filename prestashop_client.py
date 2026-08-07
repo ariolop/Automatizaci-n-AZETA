@@ -55,22 +55,29 @@ class PrestashopClient:
             raise PrestashopError(f"No se pudo conectar con PrestaShop: {e}")
         return self._parse(r)
 
-    def crear_producto(self, datos: dict, id_proveedor=None, timeout: int = 40) -> dict:
-        """Envía la ficha del scraper al módulo para crear el producto (desactivado).
+    def crear_producto(self, datos: dict, id_proveedor=None, id_impuestos=None,
+                       timeout: int = 40) -> dict:
+        """Envía la ficha del scraper al módulo para crear el producto.
 
         id_proveedor: si se indica, sobrescribe el proveedor por defecto de la
         configuración (para asignar un proveedor distinto según el origen:
-        AZETA vs Liderpapel / Comercial del sur)."""
+        AZETA vs Liderpapel / Comercial del sur).
+        id_impuestos: si se indica, sobrescribe la regla de IVA por defecto.
+
+        El producto se crea DESACTIVADO salvo que 'datos' traiga activo=True, y el
+        precio de venta se puede fijar a mano con 'precio_venta_sin_iva'."""
         prov = id_proveedor if id_proveedor is not None else self.id_proveedor
+        imp = id_impuestos if id_impuestos not in (None, "") else self.id_impuestos
         payload = {
             "token": self.token,
             "id_categoria": self.categoria_defecto,
             "id_proveedor": int(prov) if str(prov).isdigit() else 0,
-            "id_impuestos": int(self.id_impuestos) if str(self.id_impuestos).isdigit() else 0,
+            "id_impuestos": int(imp) if str(imp).isdigit() else 0,
             "producto": {
                 "nombre": datos.get("nombre"),
                 "ean13": datos.get("ean"),
                 "precio_sin_iva": datos.get("precio_unidad_sin_iva") or datos.get("precio_sin_iva"),
+                "precio_venta_con_iva": datos.get("precio_venta_con_iva"),  # PVP a mano (con IVA)
                 "coste_real": datos.get("coste_real_unidad"),   # coste con IVA + recargo
                 "pvp": datos.get("pvp_recomendado"),
                 "iva_pct": datos.get("iva_pct"),
@@ -79,6 +86,7 @@ class PrestashopClient:
                 "descripcion": datos.get("descripcion"),
                 "situacion": datos.get("situacion"),
                 "dropshipping": datos.get("dropshipping", True),
+                "activo": datos.get("activo", False),
                 "imagenes": datos.get("imagenes") or [],
                 # Opcionales: si van a None el módulo no los toca.
                 "stock": datos.get("stock"),

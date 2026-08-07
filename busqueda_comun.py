@@ -294,17 +294,35 @@ def actualizar_prestashop(ean: str | None = None, id_product=None,
         return {"ok": False, "error": str(e)}
 
 
-def publicar(proveedor: str, ean: str, stock=None, modo_venta=None) -> dict:
+def publicar(proveedor: str, ean: str, stock=None, modo_venta=None,
+             precio_con_iva=None, id_impuestos=None, activo=None) -> dict:
     """Re-busca el producto por EAN en el proveedor indicado y lo crea en
-    PrestaShop (desactivado). Devuelve {ok, id_product|error}.
+    PrestaShop. Devuelve {ok, id_product|error}.
 
-    stock y modo_venta son OPCIONALES: si van a None, el módulo no fija stock
-    (queda a 0) ni asigna modo de venta (comportamiento anterior intacto)."""
+    Todos estos son OPCIONALES (si van a None, se mantiene el comportamiento
+    anterior):
+      - stock, modo_venta.
+      - precio_con_iva: fija el PVP (precio de venta CON IVA) a mano.
+      - id_impuestos: regla de IVA a aplicar.
+      - activo: si es verdadero, el producto se crea ya activado."""
     if not prestashop_configurado():
         return {"ok": False, "error": "PrestaShop no está configurado."}
 
     stock = _normalizar_stock(stock)
     modo_venta = _normalizar_modo_venta(modo_venta)
+
+    # PVP (precio de venta CON IVA) opcional, introducido a mano.
+    precio_venta = None
+    if precio_con_iva is not None and str(precio_con_iva).strip() != "":
+        try:
+            precio_venta = float(str(precio_con_iva).replace(",", "."))
+        except (TypeError, ValueError):
+            return {"ok": False, "error": "Precio con IVA no válido."}
+
+    # Activo (opcional).
+    activar = None
+    if activo is not None and str(activo).strip() != "":
+        activar = str(activo).strip().lower() in ("1", "true", "on", "si", "sí", "yes")
 
     import config
     cfg = config.leer_config()
@@ -338,12 +356,18 @@ def publicar(proveedor: str, ean: str, stock=None, modo_venta=None) -> dict:
         payload["stock"] = stock
     if modo_venta is not None:
         payload["modo_venta"] = modo_venta
+    if precio_venta is not None:
+        payload["precio_venta_con_iva"] = precio_venta
+    if activar is not None:
+        payload["activo"] = activar
 
     try:
         from prestashop_client import PrestashopClient
-        res = PrestashopClient().crear_producto(payload, id_proveedor=id_proveedor)
+        res = PrestashopClient().crear_producto(
+            payload, id_proveedor=id_proveedor, id_impuestos=id_impuestos)
         return {"ok": True, "id_product": res.get("id_product"),
                 "nombre": payload.get("nombre"),
-                "stock": res.get("stock"), "modo_venta": res.get("modo_venta")}
+                "stock": res.get("stock"), "modo_venta": res.get("modo_venta"),
+                "activo": res.get("activo")}
     except Exception as e:  # noqa: BLE001
         return {"ok": False, "error": str(e)}

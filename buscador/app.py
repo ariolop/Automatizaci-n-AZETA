@@ -62,16 +62,23 @@ def publicar():
         ean = (data.get("ean") or "").strip()
         stock = data.get("stock")
         modo_venta = data.get("modo_venta")
+        precio_con_iva = data.get("precio_con_iva")
+        id_impuestos = data.get("id_impuestos")
+        activo = data.get("activo")
     else:
         proveedor = request.form.get("proveedor")
         ean = (request.form.get("ean") or "").strip()
         stock = request.form.get("stock")
         modo_venta = request.form.get("modo_venta")
+        precio_con_iva = request.form.get("precio_con_iva")
+        id_impuestos = request.form.get("id_impuestos")
+        activo = request.form.get("activo")
 
     if not ean or not proveedor:
         return jsonify({"ok": False, "error": "Faltan 'proveedor' y/o 'ean'."}), 400
 
-    res = bc.publicar(proveedor, ean, stock=stock, modo_venta=modo_venta)
+    res = bc.publicar(proveedor, ean, stock=stock, modo_venta=modo_venta,
+                      precio_con_iva=precio_con_iva, id_impuestos=id_impuestos, activo=activo)
     codigo = 200 if res.get("ok") else 400
     return jsonify(res), codigo
 

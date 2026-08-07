@@ -8,7 +8,7 @@
   :root{
     --bg:#0f1216; --panel:#171b21; --panel2:#1e242c; --line:#2a323c;
     --txt:#e7edf3; --muted:#9aa7b4; --accent:#4f8cff; --ok:#3ecf8e; --err:#ff6b6b;
-    --azeta:#4f8cff; --lider:#5aa832; --gold:#f4c542;
+    --azeta:#4f8cff; --lider:#5aa832; --gold:#f4c542; --orange:#ff9f43;
   }
   *{box-sizing:border-box}
   body{margin:0;background:var(--bg);color:var(--txt);
@@ -78,6 +78,8 @@
   .pubopt input,.pubopt select{padding:8px;border-radius:9px;background:var(--panel2);
           color:var(--txt);border:1px solid var(--line);font-size:13px}
   .pubopt input:focus,.pubopt select:focus{outline:none;border-color:var(--accent)}
+  .pubopt-check{flex-direction:row;align-items:center;gap:7px;min-width:100%;font-size:13px;color:var(--txt);cursor:pointer}
+  .pubopt-check input{width:16px;height:16px;flex:0 0 auto;padding:0;cursor:pointer}
   .vacio{color:var(--muted);text-align:center;padding:30px 10px}
   .foot{color:var(--muted);font-size:12px;margin-top:22px;text-align:center}
   .psbox{display:flex;gap:14px;align-items:center;background:linear-gradient(180deg,rgba(90,168,50,.08),var(--panel));
@@ -119,7 +121,7 @@
   <div id="cards" class="cards"></div>
   <div id="vacio" class="vacio">Introduce un EAN para comparar ambos proveedores.</div>
 
-  <div class="foot">Coste real = precio neto × (1 + IVA% + recargo de equivalencia). Liderpapel no publica IVA: se estima al 21%. Los productos se crean <b>desactivados</b> en PrestaShop.</div>
+  <div class="foot">Coste real = precio neto × (1 + IVA% + recargo de equivalencia). Liderpapel no publica IVA: se estima al 21%. Los productos se crean <b>desactivados</b> salvo que marques «Activar al publicar». Si no indicas precio, se calcula como coste × margen.</div>
 </main>
 
 <script src="https://unpkg.com/@zxing/library@0.21.3/umd/index.min.js"></script>
@@ -307,6 +309,13 @@ function render(d){
       }else{
         pubBloque = `
         <div class="pubopts">
+          <label class="pubopt">PVP con IVA (opcional)
+            <input type="number" class="pub-precio-con" data-coste="${p.coste_real!=null?p.coste_real:''}" min="0" step="0.01" placeholder="auto (coste × margen)">
+            <span class="pub-margen" style="font-size:11px;min-height:14px"></span>
+          </label>
+          <label class="pubopt">IVA
+            <select class="pub-impuesto"><option value="">Por defecto</option></select>
+          </label>
           <label class="pubopt">Stock (opcional)
             <input type="number" class="pub-stock" min="0" step="1" placeholder="—">
           </label>
@@ -318,6 +327,7 @@ function render(d){
               <option value="3">Ambos</option>
             </select>
           </label>
+          <label class="pubopt pubopt-check"><input type="checkbox" class="pub-activo"> Activar al publicar</label>
         </div>
         <button class="pub" onclick="publicar(this,'${provSlug}','${esc(p.ean)}')">Publicar en PrestaShop</button>`;
       }
@@ -336,21 +346,46 @@ function render(d){
       ${vigilarBtn}
     </div>`;
   }).join("");
+  // Rellena los desplegables de IVA de los bloques de publicación.
+  cardsEl.querySelectorAll(".pub-impuesto").forEach(rellenarImpuestos);
+  // Margen en vivo junto al PVP con IVA.
+  cardsEl.querySelectorAll(".pub-precio-con").forEach(inp=>{
+    inp.addEventListener("input", ()=>actualizarMargenPub(inp));
+    actualizarMargenPub(inp);
+  });
+}
+
+// Margen sobre venta: ≥45% excelente, 35–45% correcto, 25–35% justo, <25% bajo.
+function colorMargenPub(m){ return m>=45?'var(--ok)':m>=35?'var(--gold)':m>=25?'var(--orange)':'var(--err)'; }
+function actualizarMargenPub(inp){
+  const out=inp.parentNode.querySelector(".pub-margen"); if(!out) return;
+  const coste=parseFloat(inp.dataset.coste);
+  const pvp=parseFloat((inp.value||"").replace(",","."));
+  if(!isFinite(pvp) || pvp<=0 || !isFinite(coste) || coste<=0){ out.textContent=""; return; }
+  const m=(pvp-coste)/pvp*100;
+  out.textContent=`Margen ${Math.round(m)}% · coste ${fmt(coste)}`;
+  out.style.color=colorMargenPub(m);
+  out.style.fontWeight="700";
 }
 
 async function publicar(btnEl, proveedor, ean){
   btnEl.disabled=true; const card=btnEl.closest(".card"); const msg=card.querySelector(".pubmsg");
   const stockEl=card.querySelector(".pub-stock"), modoEl=card.querySelector(".pub-modo");
+  const precioEl=card.querySelector(".pub-precio-con"), impEl=card.querySelector(".pub-impuesto"), activoEl=card.querySelector(".pub-activo");
   const stock=stockEl && stockEl.value.trim()!=="" ? stockEl.value.trim() : null;
   const modo_venta=modoEl && modoEl.value!=="" ? modoEl.value : null;
+  const precio_con_iva=precioEl && precioEl.value.trim()!=="" ? precioEl.value.trim() : null;
+  const id_impuestos=(impEl && impEl.value!=="") ? impEl.value : null;
+  const activo=activoEl && activoEl.checked ? 1 : null;
   msg.innerHTML='<div class="msg info"><span class="spin"></span> Publicando…</div>';
   try{
     const r=await fetch(`${BASE}/publicar`,{method:"POST",headers:{"Content-Type":"application/json"},
-      body:JSON.stringify({proveedor,ean,stock,modo_venta})});
+      body:JSON.stringify({proveedor,ean,stock,modo_venta,precio_con_iva,id_impuestos,activo})});
     const d=await r.json();
     if(d.ok){
       const extra=[d.stock!=null?`stock ${esc(d.stock)}`:null, d.modo_venta!=null?`modo ${esc(d.modo_venta)}`:null].filter(Boolean).join(' · ');
-      msg.innerHTML=`<div class="msg ok">Creado en PrestaShop (desactivado) · ID ${esc(d.id_product||'?')}${extra?' · '+extra:''}</div>`;
+      const estado = d.activo ? 'activado' : 'desactivado';
+      msg.innerHTML=`<div class="msg ok">Creado en PrestaShop (${estado}) · ID ${esc(d.id_product||'?')}${extra?' · '+extra:''}</div>`;
       btnEl.remove();
     }else{
       msg.innerHTML=`<div class="msg err">${esc(d.error||'Error al publicar')}</div>`;
