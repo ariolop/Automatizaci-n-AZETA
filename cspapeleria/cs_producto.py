@@ -92,19 +92,20 @@ def parsear_ficha(html, cod_product, base):
     m = re.search(r"marca\s*</td>\s*<td[^>]*>(.*?)</td>", html, re.S | re.I)
     d["marca"] = unescape(_txt(m.group(1))) if m else None
 
-    # Referencia del artículo. Suele venir como fila de tabla
-    # ("referencia</td><td>...") o como texto "Ref: ...".
-    m = re.search(r"(?:referencia|ref\.?)\s*</td>\s*<td[^>]*>(.*?)</td>", html, re.S | re.I)
-    if not m:
-        # Requiere una etiqueta clara ("referencia", "ref." o "ref:") para no
-        # capturar cualquier "ref" del HTML (p. ej. "referrer").
-        m = re.search(r"\bref(?:erencia|\.|:)\s*[:.]?\s*(?:</[^>]+>\s*)?([A-Za-z0-9][A-Za-z0-9 .\-/]{1,28})", html, re.I)
-    d["referencia"] = unescape(_txt(m.group(1))).strip() if m else None
+    # Referencia del artículo. Se prueban las fuentes de más fiable a menos:
+    #   1) Fila de tabla explícita ("referencia</td><td>...").
+    #   2) Celda estructurada del listado/detalle (id="datosProducto"): la
+    #      referencia va en id="td_ratings{codigo}" dentro de <span class="resalta">
+    #      (p. ej. "275/186").
+    #   3) Último recurso: texto suelto "Ref: ..." (patrón laxo y validado, porque
+    #      captura falsos positivos como "if" a partir de "href"/JS).
+    ref = None
 
-    # Fallback: en la tabla de listado/detalle (id="datosProducto") la referencia
-    # aparece en la celda id="td_ratings{codigo}" dentro de un <span class="resalta">
-    # (p. ej. "275/186"). Se usa solo si no se detectó por los patrones anteriores.
-    if not d["referencia"]:
+    m = re.search(r"(?:referencia|ref\.?)\s*</td>\s*<td[^>]*>(.*?)</td>", html, re.S | re.I)
+    if m:
+        ref = unescape(_txt(m.group(1))).strip() or None
+
+    if not ref:
         m = re.search(
             r'id="td_ratings' + re.escape(str(cod_product)) +
             r'"[^>]*>.*?<span[^>]*class="[^"]*\bresalta\b[^"]*"[^>]*>(.*?)</span>',
@@ -113,9 +114,18 @@ def parsear_ficha(html, cod_product, base):
             m = re.search(
                 r'id="td_ratings\d+"[^>]*>.*?<span[^>]*class="[^"]*\bresalta\b[^"]*"[^>]*>(.*?)</span>',
                 html, re.S | re.I)
-        ref = unescape(_txt(m.group(1))).strip() if m else None
-        if ref:
-            d["referencia"] = ref
+        if m:
+            ref = unescape(_txt(m.group(1))).strip() or None
+
+    if not ref:
+        m = re.search(r"\bref(?:erencia|\.|:)\s*[:.]?\s*(?:</[^>]+>\s*)?([A-Za-z0-9][A-Za-z0-9 .\-/]{1,28})", html, re.I)
+        cand = unescape(_txt(m.group(1))).strip() if m else None
+        # Descarta basura del patrón laxo: palabras puramente alfabéticas y
+        # cortas ("if", "the"...). Una referencia real lleva dígito o es larga.
+        if cand and (any(c.isdigit() for c in cand) or len(cand) >= 4):
+            ref = cand
+
+    d["referencia"] = ref
 
     # EANs (pestaña Logística): distingue el EAN de la UNIDAD del EAN de la
     # CAJA/embalaje (compra recomendada, CRC). Por eso a veces hay varios.
