@@ -313,6 +313,9 @@ function render(d){
     for(const [k,v] of Object.entries(p.extra||{})){ if(v!=null&&v!=='') kv.push([k, esc(v)]); }
 
     const provSlug = cls==='azeta' ? 'azeta' : 'cs';
+    // Clave para localizar el producto al publicar/vigilar: el EAN de la ficha,
+    // o el buscado si la ficha no trae EAN (p. ej. cuando el EAN no coincide).
+    const eanLoc = p.ean || d.ean || "";
     let pubBloque = "";
     if(PS_OK){
       if(existe){
@@ -343,11 +346,11 @@ function render(d){
             : ''}
           <label class="pubopt pubopt-check"><input type="checkbox" class="pub-activo"> Activar al publicar</label>
         </div>
-        <button class="pub" onclick="publicar(this,'${provSlug}','${esc(p.ean)}')">Publicar en PrestaShop</button>`;
+        <button class="pub" onclick="publicar(this,'${provSlug}','${esc(eanLoc)}')">Publicar en PrestaShop</button>`;
       }
     }
     const nombreAttr = esc(p.nombre||"");
-    const vigilarBtn = `<button class="pub" style="margin-top:8px" onclick="monitorizar(this,'${provSlug}','${esc(p.ean)}','${nombreAttr}')">👁 Vigilar en el monitor</button>`;
+    const vigilarBtn = `<button class="pub" style="margin-top:8px" onclick="monitorizar(this,'${provSlug}','${esc(eanLoc)}','${nombreAttr}')">👁 Vigilar en el monitor</button>`;
     const avisoEan = p.ean_no_coincide
       ? `<div class="msg err">⚠ El EAN de esta ficha no coincide con el buscado. Revisa que sea el producto correcto antes de publicar.</div>`
       : "";
