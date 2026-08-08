@@ -181,7 +181,13 @@ def parsear_ficha(html, cod_product, base):
 # --------------------------------------------------------------------------- #
 # Función principal
 # --------------------------------------------------------------------------- #
-def buscar_producto(patron, sesion=None, exacto=True):
+def buscar_producto(patron, sesion=None, exacto=True, forzar=False):
+    """Busca un producto en Liderpapel.
+
+    forzar: si es True, se muestra el resultado aunque el EAN no coincida con el
+    buscado (útil cuando la búsqueda es correcta pero la ficha no lista ese EAN).
+    En ese caso la ficha se devuelve con la marca ean_no_coincide=True.
+    """
     ses = sesion or CSSession()
     es_ean = bool(re.fullmatch(r"\d{8,14}", str(patron).strip()))
     r = ses.buscar(patron, exacto=exacto and es_ean)
@@ -198,12 +204,17 @@ def buscar_producto(patron, sesion=None, exacto=True):
     # Verificación anti-falso-positivo: si busco por EAN, el resultado debe
     # contener ese EAN en su ficha (la búsqueda hace fallback y puede devolver
     # productos que NO corresponden al código buscado).
-    if es_ean:
-        patron_ean = str(patron).strip()
-        if patron_ean not in ficha.get("eans", []):
-            return {"patron": patron, "encontrado": False, "disponible": False,
-                    "motivo": "el resultado no coincide con el EAN buscado"}
+    ean_no_coincide = (
+        es_ean and str(patron).strip() not in ficha.get("eans", []))
+    if ean_no_coincide and not forzar:
+        return {"patron": patron, "encontrado": False, "disponible": False,
+                "ean_no_coincide": True,
+                "ean_encontrado": ficha.get("ean"),
+                "nombre_encontrado": ficha.get("nombre"),
+                "motivo": "el resultado no coincide con el EAN buscado"}
     ficha["encontrado"] = True
+    if ean_no_coincide:
+        ficha["ean_no_coincide"] = True
     return ficha
 
 

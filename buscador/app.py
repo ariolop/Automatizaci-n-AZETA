@@ -39,7 +39,10 @@ def api_buscar():
     if not con_azeta and not con_cs:
         return jsonify({"ok": False, "error": "Elige al menos un proveedor."}), 400
 
-    res = bc.buscar(ean, con_azeta=con_azeta, con_cs=con_cs)
+    # Forzar Liderpapel: mostrar el resultado aunque el EAN no coincida.
+    forzar_cs = _verdad(request.args.get("forzar_cs", "0"))
+
+    res = bc.buscar(ean, con_azeta=con_azeta, con_cs=con_cs, forzar_cs=forzar_cs)
 
     # ¿Ya existe en PrestaShop? (por cada EAN encontrado, sin duplicar consulta)
     ya = {}

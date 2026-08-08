@@ -55,13 +55,13 @@ def buscar_azeta(ean: str) -> dict:
                         "error": f"Error consultando AZETA: {e}"}
 
 
-def buscar_cs(ean: str) -> dict:
+def buscar_cs(ean: str, forzar: bool = False) -> dict:
     with _cs["lock"]:
         for intento in (1, 2):
             try:
                 if _cs["ses"] is None:
                     _cs["ses"] = CSSession()
-                datos = cs_producto.buscar_producto(ean, sesion=_cs["ses"])
+                datos = cs_producto.buscar_producto(ean, sesion=_cs["ses"], forzar=forzar)
                 datos["proveedor"] = "Liderpapel"
                 return datos
             except CSError as e:
@@ -109,6 +109,9 @@ def norm_cs(d: dict) -> dict:
         "proveedor": "Liderpapel",
         "encontrado": bool(d.get("encontrado")),
         "error": d.get("error") or d.get("motivo"),
+        "ean_no_coincide": bool(d.get("ean_no_coincide")),
+        "ean_encontrado": d.get("ean_encontrado"),
+        "nombre_encontrado": d.get("nombre_encontrado"),
         "nombre": d.get("nombre"),
         "ean": d.get("ean"),
         "marca": d.get("marca"),
@@ -152,9 +155,10 @@ def comparar(azeta: dict, cs: dict) -> dict:
 # --------------------------------------------------------------------------- #
 # Búsqueda combinada (uno o los dos proveedores, en paralelo)
 # --------------------------------------------------------------------------- #
-def buscar(ean: str, con_azeta: bool = True, con_cs: bool = True) -> dict:
+def buscar(ean: str, con_azeta: bool = True, con_cs: bool = True,
+           forzar_cs: bool = False) -> dict:
     fa = _pool.submit(buscar_azeta, ean) if con_azeta else None
-    fc = _pool.submit(buscar_cs, ean) if con_cs else None
+    fc = _pool.submit(buscar_cs, ean, forzar_cs) if con_cs else None
     azeta = norm_azeta(fa.result()) if fa else None
     cs = norm_cs(fc.result()) if fc else None
     encontrado = bool((azeta and azeta["encontrado"]) or (cs and cs["encontrado"]))
@@ -336,7 +340,9 @@ def publicar(proveedor: str, ean: str, stock=None, modo_venta=None,
         payload = raw  # ya viene con las claves que espera el módulo
         id_proveedor = cfg.get("PRESTASHOP_PROVEEDOR_AZETA", "")
     elif prov in ("cs", "liderpapel"):
-        raw = buscar_cs(ean)
+        # forzar=True: si el usuario llega aquí es porque ya vio la ficha (quizá
+        # tras pulsar "ver de todos modos"), así que no repetimos el guard de EAN.
+        raw = buscar_cs(ean, forzar=True)
         if not raw or not raw.get("encontrado"):
             return {"ok": False, "error": "No se encontró el producto en Liderpapel."}
         payload = _mapear_cs_a_prestashop(raw)

@@ -148,7 +148,7 @@ function setSearching(on){
   }
 }
 
-async function buscar(){
+async function buscar(forzarCs){
   if(currentAbort) return;               // ya hay una búsqueda en curso: ignora relecturas
   const ean=eanEl.value.trim();
   if(!ean){eanEl.focus();return;}
@@ -159,7 +159,7 @@ async function buscar(){
   setSearching(true);
   statusEl.innerHTML='<span class="spin"></span> Consultando '+[azeta?'AZETA':null,cs?'Liderpapel':null].filter(Boolean).join(' y ')+'…';
   try{
-    const url=`${BASE}/api/buscar?ean=${encodeURIComponent(ean)}&azeta=${azeta?1:0}&cs=${cs?1:0}`;
+    const url=`${BASE}/api/buscar?ean=${encodeURIComponent(ean)}&azeta=${azeta?1:0}&cs=${cs?1:0}${forzarCs?'&forzar_cs=1':''}`;
     const r=await fetch(url,{signal:currentAbort.signal}); const d=await r.json();
     if(!d.ok){statusEl.innerHTML=`<span class="msg err">${esc(d.error||'Error')}</span>`;return;}
     render(d);
@@ -288,6 +288,16 @@ function render(d){
       (cls==='azeta' && c.mas_barato==='AZETA') || (cls==='lider' && c.mas_barato==='Liderpapel'));
     const tag = cls==='azeta' ? '<span class="tag azeta">AZETA</span>' : '<span class="tag lider">Liderpapel</span>';
     if(!p.encontrado){
+      // El EAN no coincide, pero la búsqueda puede ser correcta: ofrecemos forzar.
+      if(p.ean_no_coincide){
+        const detalle = [
+          p.nombre_encontrado ? `Encontrado: <b>${esc(p.nombre_encontrado)}</b>` : null,
+          p.ean_encontrado ? `EAN de la ficha: ${esc(p.ean_encontrado)}` : null,
+        ].filter(Boolean).join('<br>');
+        return `<div class="card ${cls}"><h2>${tag}</h2>
+          <div class="msg info">El EAN no coincide con el buscado.${detalle?'<br>'+detalle:''}</div>
+          <button class="pub" style="margin-top:10px" onclick="buscar(true)">Ver de todos modos</button></div>`;
+      }
       return `<div class="card ${cls}"><h2>${tag}</h2>
         <div class="msg ${p.error?'err':'info'}">${esc(p.error||'No encontrado en este proveedor.')}</div></div>`;
     }
@@ -335,10 +345,14 @@ function render(d){
     }
     const nombreAttr = esc(p.nombre||"");
     const vigilarBtn = `<button class="pub" style="margin-top:8px" onclick="monitorizar(this,'${provSlug}','${esc(p.ean)}','${nombreAttr}')">👁 Vigilar en el monitor</button>`;
+    const avisoEan = p.ean_no_coincide
+      ? `<div class="msg err">⚠ El EAN de esta ficha no coincide con el buscado. Revisa que sea el producto correcto antes de publicar.</div>`
+      : "";
     return `<div class="card ${cls}">
       <h2>${tag} ${esBarato?'<span class="barato">★ más barato</span>':''}</h2>
       ${img}
       <div class="nombre">${esc(p.nombre||"(sin nombre)")}</div>
+      ${avisoEan}
       <div class="coste">${fmt(p.coste_real)} <span class="muted" style="font-size:12px;font-weight:400">coste real/ud</span></div>
       <div class="kv">${kv.map(([k,v])=>`<div class="k">${k}</div><div>${v}</div>`).join("")}</div>
       <div class="pubmsg"></div>
