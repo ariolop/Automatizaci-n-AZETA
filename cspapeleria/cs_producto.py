@@ -101,6 +101,22 @@ def parsear_ficha(html, cod_product, base):
         m = re.search(r"\bref(?:erencia|\.|:)\s*[:.]?\s*(?:</[^>]+>\s*)?([A-Za-z0-9][A-Za-z0-9 .\-/]{1,28})", html, re.I)
     d["referencia"] = unescape(_txt(m.group(1))).strip() if m else None
 
+    # Fallback: en la tabla de listado/detalle (id="datosProducto") la referencia
+    # aparece en la celda id="td_ratings{codigo}" dentro de un <span class="resalta">
+    # (p. ej. "275/186"). Se usa solo si no se detectó por los patrones anteriores.
+    if not d["referencia"]:
+        m = re.search(
+            r'id="td_ratings' + re.escape(str(cod_product)) +
+            r'"[^>]*>.*?<span[^>]*class="[^"]*\bresalta\b[^"]*"[^>]*>(.*?)</span>',
+            html, re.S | re.I)
+        if not m:  # sin anclar al código, por si el id no cuadra exactamente
+            m = re.search(
+                r'id="td_ratings\d+"[^>]*>.*?<span[^>]*class="[^"]*\bresalta\b[^"]*"[^>]*>(.*?)</span>',
+                html, re.S | re.I)
+        ref = unescape(_txt(m.group(1))).strip() if m else None
+        if ref:
+            d["referencia"] = ref
+
     # EANs (pestaña Logística): distingue el EAN de la UNIDAD del EAN de la
     # CAJA/embalaje (compra recomendada, CRC). Por eso a veces hay varios.
     log = re.search(r'id="contentTabLogistica".*?(?=id="contentTab|Comprados juntos|<footer)', html, re.S | re.I)

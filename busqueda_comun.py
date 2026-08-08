@@ -300,7 +300,8 @@ def actualizar_prestashop(ean: str | None = None, id_product=None,
 
 
 def publicar(proveedor: str, ean: str, stock=None, modo_venta=None,
-             precio_con_iva=None, id_impuestos=None, activo=None) -> dict:
+             precio_con_iva=None, id_impuestos=None, activo=None,
+             ean_publicar=None) -> dict:
     """Re-busca el producto por EAN en el proveedor indicado y lo crea en
     PrestaShop. Devuelve {ok, id_product|error}.
 
@@ -309,7 +310,10 @@ def publicar(proveedor: str, ean: str, stock=None, modo_venta=None,
       - stock, modo_venta.
       - precio_con_iva: fija el PVP (precio de venta CON IVA) a mano.
       - id_impuestos: regla de IVA a aplicar.
-      - activo: si es verdadero, el producto se crea ya activado."""
+      - activo: si es verdadero, el producto se crea ya activado.
+      - ean_publicar: EAN13 con el que crear el producto. Útil cuando la ficha
+        del proveedor lista un EAN distinto al buscado (el producto se localiza
+        por `ean`, pero se publica con `ean_publicar`)."""
     if not prestashop_configurado():
         return {"ok": False, "error": "PrestaShop no está configurado."}
 
@@ -357,6 +361,14 @@ def publicar(proveedor: str, ean: str, stock=None, modo_venta=None,
         id_proveedor = cfg.get("PRESTASHOP_PROVEEDOR_CS", "")
     else:
         return {"ok": False, "error": f"Proveedor no válido: {proveedor}"}
+
+    # EAN a publicar: si se indica uno (p. ej. el buscado, cuando la ficha del
+    # proveedor lista otro distinto), se usa ese en lugar del de la ficha.
+    if ean_publicar is not None and str(ean_publicar).strip() != "":
+        nuevo_ean = "".join(ch for ch in str(ean_publicar) if ch.isdigit())
+        if not nuevo_ean:
+            return {"ok": False, "error": "EAN a publicar no válido."}
+        payload["ean"] = nuevo_ean
 
     # Campos opcionales comunes a ambos proveedores.
     if stock is not None:

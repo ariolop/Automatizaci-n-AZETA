@@ -338,6 +338,9 @@ function render(d){
               <option value="3">Ambos</option>
             </select>
           </label>
+          ${(cls==='lider' && p.ean_no_coincide && d.ean && d.ean!==p.ean)
+            ? `<label class="pubopt pubopt-check"><input type="checkbox" class="pub-ean-buscado" data-ean="${esc(d.ean)}" checked> Publicar con el EAN buscado (${esc(d.ean)})</label>`
+            : ''}
           <label class="pubopt pubopt-check"><input type="checkbox" class="pub-activo"> Activar al publicar</label>
         </div>
         <button class="pub" onclick="publicar(this,'${provSlug}','${esc(p.ean)}')">Publicar en PrestaShop</button>`;
@@ -392,10 +395,12 @@ async function publicar(btnEl, proveedor, ean){
   const precio_con_iva=precioEl && precioEl.value.trim()!=="" ? precioEl.value.trim() : null;
   const id_impuestos=(impEl && impEl.value!=="") ? impEl.value : null;
   const activo=activoEl && activoEl.checked ? 1 : null;
+  const eanBuscadoEl=card.querySelector(".pub-ean-buscado");
+  const ean_publicar=(eanBuscadoEl && eanBuscadoEl.checked) ? eanBuscadoEl.dataset.ean : null;
   msg.innerHTML='<div class="msg info"><span class="spin"></span> Publicando…</div>';
   try{
     const r=await fetch(`${BASE}/publicar`,{method:"POST",headers:{"Content-Type":"application/json"},
-      body:JSON.stringify({proveedor,ean,stock,modo_venta,precio_con_iva,id_impuestos,activo})});
+      body:JSON.stringify({proveedor,ean,stock,modo_venta,precio_con_iva,id_impuestos,activo,ean_publicar})});
     const d=await r.json();
     if(d.ok){
       const extra=[d.stock!=null?`stock ${esc(d.stock)}`:null, d.modo_venta!=null?`modo ${esc(d.modo_venta)}`:null].filter(Boolean).join(' · ');
