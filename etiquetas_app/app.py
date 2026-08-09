@@ -19,6 +19,7 @@ from io import BytesIO
 from flask import (Flask, jsonify, render_template, request, send_file)
 
 import busqueda_comun as bc  # reutiliza prestashop_configurado()
+import etiquetas_comun as ec  # persistencia del catálogo en Supabase
 
 app = Flask(__name__)
 
@@ -28,7 +29,8 @@ app = Flask(__name__)
 # --------------------------------------------------------------------------- #
 @app.route("/")
 def index():
-    return render_template("etiquetas.html", ps_ok=bc.prestashop_configurado())
+    return render_template("etiquetas.html", ps_ok=bc.prestashop_configurado(),
+                           persist_ok=ec.activo())
 
 
 @app.route("/api/catalogo")
@@ -54,6 +56,43 @@ def api_catalogo():
             "precio": p.get("precio"),
         })
     return jsonify({"ok": True, "total": len(salida), "productos": salida})
+
+
+# --------------------------------------------------------------------------- #
+# Catálogo persistente en Supabase (espejo de la selección)
+# --------------------------------------------------------------------------- #
+@app.route("/api/catalogo/lista")
+def api_catalogo_lista():
+    """Devuelve el catálogo guardado, para precargar la selección al abrir."""
+    if not ec.activo():
+        return jsonify({"ok": True, "persist": False, "productos": []})
+    return jsonify({"ok": True, "persist": True, "productos": ec.listar()})
+
+
+@app.route("/api/catalogo/guardar", methods=["POST"])
+def api_catalogo_guardar():
+    """Upsert de los productos seleccionados (uno o varios)."""
+    if not ec.activo():
+        return jsonify({"ok": False, "error": "Supabase no está configurado."}), 400
+    data = request.get_json(silent=True) or {}
+    items = data.get("items") or []
+    if not items:
+        return jsonify({"ok": False, "error": "Sin productos que guardar."}), 400
+    ok = ec.guardar_muchos(items)
+    return jsonify({"ok": ok, "n": len(items)}), (200 if ok else 500)
+
+
+@app.route("/api/catalogo/quitar", methods=["POST"])
+def api_catalogo_quitar():
+    """Borra del catálogo los productos deseleccionados (por id de PrestaShop)."""
+    if not ec.activo():
+        return jsonify({"ok": False, "error": "Supabase no está configurado."}), 400
+    data = request.get_json(silent=True) or {}
+    ids = data.get("ids") or []
+    if not ids:
+        return jsonify({"ok": False, "error": "Sin ids que quitar."}), 400
+    ok = ec.quitar_muchos(ids)
+    return jsonify({"ok": ok, "n": len(ids)}), (200 if ok else 500)
 
 
 # --------------------------------------------------------------------------- #

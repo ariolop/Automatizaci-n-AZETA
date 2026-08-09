@@ -92,7 +92,8 @@
   </main>
 
   <aside>
-    <div class="sh"><b>Seleccionados</b> <span class="muted" id="nsel">0</span><span class="sp"></span>
+    <div class="sh"><b>Seleccionados</b> <span class="muted" id="nsel">0</span>
+      <span class="muted" id="syncst" style="font-size:11px"></span><span class="sp"></span>
       <button class="lnk" id="selNone">Quitar todos</button></div>
     <div class="sbody" id="sbody"><div class="svacio">Aún no has seleccionado nada.<br>Haz clic en las filas del catálogo.</div></div>
   </aside>
@@ -112,8 +113,12 @@
 <script>
 const $ = s => document.querySelector(s);
 let CATALOGO = [];
-let SEL = new Map();                 // clave -> {ean, nombre, fabricante}
+let SEL = new Map();                 // clave -> {id, ean, nombre, fabricante, precio, activo}
+let SYNCED = new Set();              // ids de PrestaShop ya guardados en Supabase
+let syncListo = false, syncTimer = null;
+const PERSIST = {{ 'true' if persist_ok else 'false' }};
 const clave = p => (p.id ?? '') + '|' + (p.ean13 || '');
+const idDeClave = k => (String(k).split('|')[0] || '').trim();
 const marcaDe = p => (p.fabricante || '').trim() || 'Sin marca';
 
 // --- Persistencia en el navegador (selección + opciones) --------------------
@@ -217,10 +222,45 @@ function actualizar(){
   $('#gen').disabled = (n===0);
   renderSidebar();
   guardarSel();
+  sincronizar();
 }
 
 function prodDeClave(k){ return CATALOGO.find(p => clave(p)===k); }
-function selDe(p){ return {ean:p.ean13, nombre:p.nombre, fabricante:p.fabricante||''}; }
+function selDe(p){ return {id:p.id, ean:p.ean13, nombre:p.nombre, fabricante:p.fabricante||'', precio:p.precio, activo:p.activo}; }
+
+// --- Sincronización con Supabase (la tabla es un espejo de la selección) -----
+function marcaEstado(txt){ const e=$('#syncst'); if(e) e.textContent=txt; }
+function sincronizar(){
+  if(!PERSIST || !syncListo) return;
+  clearTimeout(syncTimer);
+  syncTimer = setTimeout(enviarSync, 400);
+}
+async function enviarSync(){
+  // ids actualmente seleccionados (con su producto) frente a lo ya guardado.
+  const actuales = new Map();
+  for(const [k,v] of SEL){ const id=idDeClave(k); if(id) actuales.set(id, {id:Number(id), ...v}); }
+  const añadir = [];
+  for(const [id,item] of actuales){ if(!SYNCED.has(id)) añadir.push(item); }
+  const quitar = [];
+  for(const id of SYNCED){ if(!actuales.has(id)) quitar.push(Number(id)); }
+  if(!añadir.length && !quitar.length){ return; }
+  marcaEstado('guardando…');
+  try{
+    if(añadir.length){
+      const r = await fetch('api/catalogo/guardar', {method:'POST',
+        headers:{'Content-Type':'application/json'}, body: JSON.stringify({items:añadir})});
+      if(r.ok){ for(const it of añadir) SYNCED.add(String(it.id)); }
+      else throw new Error('guardar');
+    }
+    if(quitar.length){
+      const r = await fetch('api/catalogo/quitar', {method:'POST',
+        headers:{'Content-Type':'application/json'}, body: JSON.stringify({ids:quitar})});
+      if(r.ok){ for(const id of quitar) SYNCED.delete(String(id)); }
+      else throw new Error('quitar');
+    }
+    marcaEstado('guardado ✓');
+  }catch(e){ marcaEstado('error al guardar'); }
+}
 function quitar(k){
   SEL.delete(k);
   const tr = document.querySelector(`tr[data-k="${CSS.escape(k)}"]`);
@@ -284,10 +324,33 @@ $('#gen').addEventListener('click', async () => {
   finally{ btn.textContent = txt; actualizar(); }
 });
 
+// Al abrir: si hay persistencia, la selección la manda Supabase (fuente de
+// verdad); si no, se usa la copia local del navegador.
+async function init(){
+  if(PERSIST){
+    try{
+      const r = await fetch('api/catalogo/lista');
+      const d = await r.json();
+      if(d.ok && d.persist){
+        SEL = new Map(); SYNCED = new Set();
+        for(const p of (d.productos||[])){
+          const k = (p.id_prestashop ?? '') + '|' + (p.ean13 || '');
+          SEL.set(k, {id:p.id_prestashop, ean:p.ean13||'', nombre:p.nombre||'',
+                      fabricante:p.fabricante||'', precio:p.precio, activo:p.activo_ps});
+          SYNCED.add(String(p.id_prestashop));
+        }
+      }
+    }catch(e){ /* sin conexión: nos quedamos con la copia local */ }
+  }
+  syncListo = true;
+  actualizar();   // pinta la selección (ya no dispara sync espurio)
+  cargar();
+}
+
 cargarOpts();
 cargarSel();
-actualizar();   // muestra los seleccionados guardados aunque el catálogo tarde
-cargar();
+actualizar();   // muestra la selección local mientras carga Supabase/catálogo
+init();
 </script>
 </body>
 </html>
