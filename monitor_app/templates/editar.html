@@ -36,8 +36,11 @@
       <input type="hidden" name="ean" value="{{ v.ean }}">
       <label>Nombre</label>
       <input type="text" name="nombre" value="{{ v.nombre or '' }}">
-      <label>EAN</label>
+      <label>EAN (PrestaShop)</label>
       <input type="text" name="nuevo_ean" value="{{ v.ean }}">
+      <label>EAN expositor <span class="muted">— el que usa {{ v.proveedor }}, si es distinto</span></label>
+      <input type="text" name="ean_expositor" value="{{ v.ean_expositor or '' }}" inputmode="numeric"
+             placeholder="Vacío = se consulta con el EAN de arriba">
       {% if v.id_prestashop %}
       <label class="ck"><input type="checkbox" name="empujar_ps" checked> Aplicar también en PrestaShop (mantener ambos iguales)</label>
       {% else %}

@@ -324,6 +324,51 @@ $('#gen').addEventListener('click', async () => {
   finally{ btn.textContent = txt; actualizar(); }
 });
 
+// --- Trabajo a varias manos: sondeo del catálogo compartido -----------------
+// Cada POLL_MS se relee Supabase y se reconcilia contra la selección local
+// usando SYNCED como base: se añaden/checkean las altas de otros y se
+// desmarcan sus bajas, SIN pisar los cambios locales aún no guardados.
+const POLL_MS = 5000;
+let pollTimer = null, pollEnCurso = false;
+async function poll(){
+  if(!PERSIST || pollEnCurso || document.hidden) return;
+  pollEnCurso = true;
+  try{
+    const r = await fetch('api/catalogo/lista');
+    const d = await r.json();
+    if(!d.ok || !d.persist) return;
+    const server = new Map();                       // id(str) -> fila
+    for(const p of (d.productos||[])) server.set(String(p.id_prestashop), p);
+    let cambios = false;
+    // Altas de otra persona (en servidor, aún no conocidas por mí).
+    for(const [id,p] of server){
+      if(!SYNCED.has(id)){
+        const k = (p.id_prestashop ?? '') + '|' + (p.ean13 || '');
+        if(!SEL.has(k)){
+          SEL.set(k, {id:p.id_prestashop, ean:p.ean13||'', nombre:p.nombre||'',
+                      fabricante:p.fabricante||'', precio:p.precio, activo:p.activo_ps});
+          cambios = true;
+        }
+        SYNCED.add(id);
+      }
+    }
+    // Bajas de otra persona (yo las tenía guardadas, ya no están).
+    for(const id of [...SYNCED]){
+      if(!server.has(id)){
+        for(const k of [...SEL.keys()]){ if(idDeClave(k)===id){ SEL.delete(k); cambios = true; } }
+        SYNCED.delete(id);
+      }
+    }
+    if(cambios) render();   // repinta tabla (checks) y barra lateral
+  }catch(e){ /* red intermitente: se reintenta en el próximo ciclo */ }
+  finally{ pollEnCurso = false; }
+}
+function arrancarPoll(){
+  if(!PERSIST || pollTimer) return;
+  pollTimer = setInterval(poll, POLL_MS);
+}
+document.addEventListener('visibilitychange', () => { if(!document.hidden) poll(); });
+
 // Al abrir: si hay persistencia, la selección la manda Supabase (fuente de
 // verdad); si no, se usa la copia local del navegador.
 async function init(){
@@ -345,6 +390,7 @@ async function init(){
   syncListo = true;
   actualizar();   // pinta la selección (ya no dispara sync espurio)
   cargar();
+  arrancarPoll(); // mantiene la lista al día si hay otra persona trabajando
 }
 
 cargarOpts();

@@ -13,9 +13,13 @@
  *   "id_product": 123,        // (o "ean": "8411..." para localizarlo por EAN)
  *   "producto": {
  *     "ean13": "8411...",
+ *     "ean_expositor": "8411...",   // EAN del proveedor (tabla apl_product_expositor);
+ *                                   // cadena vacía = borrar el enlace
  *     "nombre": "Nuevo nombre",
  *     "precio": 12.34,          // precio CON IVA (se guarda el base sin IVA)
- *     "stock": 25,              // cantidad disponible (StockAvailable)
+ *     "stock": 25,              // cantidad disponible (StockAvailable). Si el producto
+ *                               // estaba a 0 y pasa a tener unidades, se reactiva
+ *                               // "Disponible para pedido" (available_for_order).
  *     "id_impuestos": 1,        // id_tax_rules_group (tipo de impuesto)
  *     "activo": 1               // 1 = activo, 0 = desactivado
  *   }
@@ -53,12 +57,15 @@ class AplproveedoresconectorActualizarModuleFrontController extends ModuleFrontC
         }
 
         $id = (int) ($in['id_product'] ?? 0);
-        // Si no viene id, se puede localizar por EAN
+        // Si no viene id, se puede localizar por EAN (ean13 o, si no, expositor)
         if (!$id && !empty($in['ean'])) {
             $ean = preg_replace('/\D/', '', (string) $in['ean']);
             $id = (int) Db::getInstance()->getValue(
                 'SELECT id_product FROM ' . _DB_PREFIX_ . 'product WHERE ean13 = "' . pSQL($ean) . '"'
             );
+            if (!$id) {
+                $id = (int) $this->module->productoPorEanExpositor($ean);
+            }
         }
         if (!$id) {
             $this->responder(['success' => false, 'error' => 'Falta id_product o ean'], 400);
@@ -106,11 +113,31 @@ class AplproveedoresconectorActualizarModuleFrontController extends ModuleFrontC
             }
         }
 
+        // EAN de expositor: tabla propia, no es un campo de Product.
+        if (array_key_exists('ean_expositor', $p) && $p['ean_expositor'] !== null) {
+            if ($this->module->guardarEanExpositor($id, (string) $p['ean_expositor'])) {
+                $cambios[] = 'ean_expositor';
+            } else {
+                $this->responder([
+                    'success' => false,
+                    'error' => 'No existe la tabla del EAN de expositor en esta tienda.',
+                ], 500);
+            }
+        }
+
         // Stock: se gestiona aparte (StockAvailable), no depende de save().
         if (array_key_exists('stock', $p) && $p['stock'] !== null && $p['stock'] !== '') {
             $stock = max(0, (int) $p['stock']);
+            $stockPrevio = (int) StockAvailable::getQuantityAvailableByProduct($id);
             StockAvailable::setQuantity($id, 0, $stock, (int) $this->context->shop->id);
             $cambios[] = 'stock';
+
+            // El producto estaba agotado y vuelve a tener unidades: se reactiva
+            // "Disponible para pedido" para que se pueda comprar otra vez.
+            if ($stockPrevio <= 0 && $stock > 0 && !(int) $product->available_for_order) {
+                $product->available_for_order = 1;
+                $cambios[] = 'available_for_order';
+            }
         }
 
         if (!$cambios) {
@@ -119,7 +146,7 @@ class AplproveedoresconectorActualizarModuleFrontController extends ModuleFrontC
 
         // Solo guardamos el objeto Product si hubo cambios propios de él
         // (ean13/nombre/precio); el stock ya se aplicó por separado.
-        $cambiosProducto = array_diff($cambios, ['stock']);
+        $cambiosProducto = array_diff($cambios, ['stock', 'ean_expositor']);
         if ($cambiosProducto) {
             try {
                 if (!$product->save()) {
@@ -135,6 +162,7 @@ class AplproveedoresconectorActualizarModuleFrontController extends ModuleFrontC
             'id_product' => $id,
             'actualizado' => $cambios,
             'ean13' => $product->ean13,
+            'ean_expositor' => $this->module->obtenerEanExpositor($id),
         ]);
     }
 

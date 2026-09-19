@@ -3,6 +3,10 @@ monitor_app/app.py — Monitor unificado (AZETA + Liderpapel)
 ===========================================================
 Una sola lista de productos vigilados, con etiqueta de proveedor. El mismo EAN
 puede vigilarse en AZETA y en Liderpapel a la vez. Persistencia en Supabase.
+
+Un producto puede estar en PrestaShop con un EAN y en el proveedor con otro (el
+del expositor). La fila guarda los dos: 'ean' (PrestaShop, clave y columna de
+PVP) y 'ean_expositor' (el que se usa para consultar al proveedor).
 """
 from __future__ import annotations
 
@@ -89,6 +93,7 @@ def comprobar_uno():
 
         from datetime import datetime, timezone
         return jsonify({"ok": True, "estado": r.get("estado"), "stock": r.get("stock"),
+                        "ean_consultado": r.get("ean_consultado"),
                         "precio_neto": r.get("precio_neto"), "coste_real": r.get("coste_real"),
                         "ps_pvp": ps_pvp, "ps_en_tienda": ps_en_tienda,
                         "ultima_revision": datetime.now(timezone.utc).isoformat()})
@@ -130,14 +135,17 @@ def cambiar_proveedor():
 @app.route("/add", methods=["POST"])
 def add():
     ean = (request.form.get("ean") or "").strip()
+    ean_exp = (request.form.get("ean_expositor") or "").strip() or None
     provs = request.form.getlist("proveedores")  # ['AZETA','Liderpapel']
     if not ean:
         flash("Introduce un EAN.", "error")
     elif not provs:
         flash("Elige al menos un proveedor.", "error")
     else:
-        n = sum(1 for p in provs if mon.añadir(ean, p, origen="manual"))
-        flash(f"Añadido «{ean}» a {n} proveedor(es).", "ok" if n else "error")
+        n = sum(1 for p in provs
+                if mon.añadir(ean, p, origen="manual", ean_expositor=ean_exp))
+        extra = f" (se consultará con {ean_exp})" if ean_exp else ""
+        flash(f"Añadido «{ean}» a {n} proveedor(es){extra}.", "ok" if n else "error")
     return redirect(url_for("index"))
 
 
@@ -185,6 +193,7 @@ def editar():
             ean, proveedor,
             nuevo_nombre=request.form.get("nombre"),
             nuevo_ean=request.form.get("nuevo_ean"),
+            nuevo_ean_expositor=request.form.get("ean_expositor"),
             empujar_ps=request.form.get("empujar_ps") == "on",
         )
         if res.get("ok"):

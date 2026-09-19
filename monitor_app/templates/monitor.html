@@ -100,7 +100,9 @@
 
   <div class="bar">
     <form method="post" action="{{ request.script_root }}/add">
-      <input type="text" name="ean" inputmode="numeric" placeholder="EAN a vigilar" style="min-width:180px">
+      <input type="text" name="ean" inputmode="numeric" placeholder="EAN a vigilar (PrestaShop)" style="min-width:190px">
+      <input type="text" name="ean_expositor" inputmode="numeric" placeholder="EAN expositor (opcional)"
+             title="EAN con el que el proveedor vende el producto, si no coincide con el de PrestaShop" style="min-width:190px">
       <label class="ck"><input type="checkbox" name="proveedores" value="AZETA" checked> AZETA</label>
       <label class="ck"><input type="checkbox" name="proveedores" value="Liderpapel" checked> Liderpapel</label>
       <button type="submit">Añadir</button>
@@ -128,7 +130,8 @@
   <table id="tabla">
     <thead><tr>
       <th class="sortable" data-type="text">Proveedor<span class="arrow">↕</span></th>
-      <th class="sortable" data-type="num">EAN<span class="arrow">↕</span></th>
+      <th class="sortable" data-type="num" title="EAN en PrestaShop (clave del vigilado)">EAN<span class="arrow">↕</span></th>
+      <th class="sortable" data-type="num" title="EAN con el que se consulta al proveedor, si es distinto">EAN expositor<span class="arrow">↕</span></th>
       <th class="sortable" data-type="text">Nombre<span class="arrow">↕</span></th>
       <th class="sortable" data-type="text">Estado<span class="arrow">↕</span></th>
       <th class="sortable right" data-type="num">Stock<span class="arrow">↕</span></th>
@@ -144,6 +147,10 @@
       <tr data-ean="{{ v.ean }}" data-prov="{{ v.proveedor }}">
         <td><span class="tag {{ v.proveedor }}">{{ v.proveedor }}</span></td>
         <td>{{ v.ean }}</td>
+        <td class="c-eanexp">
+          {% if v.get('ean_expositor') %}<span title="Se consulta al proveedor con este EAN">{{ v.ean_expositor }}</span>
+          {% else %}<span class="muted">—</span>{% endif %}
+        </td>
         <td>{{ v.nombre or '—' }}</td>
         <td class="c-estado"><span class="est {{ v.estado or 'desconocido' }}">{{ v.estado or '—' }}</span></td>
         <td class="right c-stock">{{ v.get('stock') if v.get('stock') is not none else '—' }}</td>

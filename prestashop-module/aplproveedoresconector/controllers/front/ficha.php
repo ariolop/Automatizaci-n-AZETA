@@ -5,6 +5,10 @@
  * IVA), imagen de portada y si está activo. Para mostrar en la app cómo está el
  * producto en PrestaShop.
  *
+ * Si el EAN no coincide con ningún ean13, se reintenta por el EAN de expositor
+ * (tabla `<prefijo>apl_product_expositor`). La respuesta incluye 'ean13' y
+ * 'ean_expositor' para que la app sepa con cuál se ha localizado.
+ *
  * Endpoint:
  *   {shop}/index.php?fc=module&module=aplproveedoresconector&controller=ficha
  *
@@ -49,6 +53,10 @@ class AplproveedoresconectorFichaModuleFrontController extends ModuleFrontContro
             'SELECT id_product FROM ' . _DB_PREFIX_ . 'product WHERE ean13 = "' . pSQL($ean) . '"'
         );
         if (!$id) {
+            // Segundo intento: el EAN con el que lo vende el proveedor (expositor).
+            $id = (int) $this->module->productoPorEanExpositor($ean);
+        }
+        if (!$id) {
             $this->responder(['success' => true, 'encontrado' => false]);
         }
 
@@ -83,6 +91,8 @@ class AplproveedoresconectorFichaModuleFrontController extends ModuleFrontContro
             'encontrado' => true,
             'id_product' => $id,
             'nombre' => $nombre,
+            'ean13' => (string) $product->ean13,
+            'ean_expositor' => $this->module->obtenerEanExpositor($id),
             'activo' => (bool) $product->active,
             'precio' => round((float) Product::getPriceStatic($id, true), 2),
             'precio_sin_iva' => round((float) Product::getPriceStatic($id, false), 2),

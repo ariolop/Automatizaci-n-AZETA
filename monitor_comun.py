@@ -5,6 +5,11 @@ Un único monitor para los dos proveedores. Cada fila vigilada se identifica por
 la pareja (ean, proveedor), de modo que el MISMO EAN puede estar vigilado en
 AZETA y en Liderpapel a la vez, cada uno con su estado/stock/precio.
 
+EAN de expositor: algunos productos están en PrestaShop con un EAN y en el
+proveedor con otro (el del expositor). En esos casos la fila guarda los dos:
+'ean' es SIEMPRE el de PrestaShop (y parte de la clave), y 'ean_expositor' es
+el del proveedor, que es el que se usa para consultar AZETA / Liderpapel.
+
 Persistencia: Supabase (PostgREST), mismo patrón que el historial del escáner.
 Variables de entorno:
     SUPABASE_URL, SUPABASE_KEY  (service_role)
@@ -71,6 +76,15 @@ def _estado_desde_ficha(norm: dict) -> str:
     if norm.get("encontrado"):
         return "agotado"
     return "desaparecido"
+
+
+def ean_consulta(v: dict) -> str:
+    """EAN con el que hay que preguntar al proveedor.
+
+    Si la fila tiene 'ean_expositor' (el EAN con el que el proveedor vende el
+    producto), se usa ese; si no, el EAN de PrestaShop."""
+    exp = (v.get("ean_expositor") or "").strip()
+    return exp or str(v.get("ean") or "").strip()
 
 
 # --------------------------------------------------------------------------- #
@@ -144,7 +158,7 @@ def listar_pagina(proveedor: str | None = None, estado: str | None = None,
         params["estado"] = f"eq.{estado}"
     if buscar:
         t = buscar.replace(",", " ").strip()
-        params["or"] = f"(ean.ilike.*{t}*,nombre.ilike.*{t}*)"
+        params["or"] = f"(ean.ilike.*{t}*,ean_expositor.ilike.*{t}*,nombre.ilike.*{t}*)"
     try:
         r = requests.get(_url(TABLA), params=params,
                         headers=_headers({"Prefer": "count=exact", "Range-Unit": "items",
@@ -201,12 +215,17 @@ def historico_de(ean: str, proveedor: str, limite: int = 100) -> list[dict]:
 def añadir(ean: str, proveedor: str, nombre: str | None = None,
            origen: str = "manual", id_prestashop=None,
            estado: str | None = None, stock=None,
-           precio_neto=None, coste_real=None) -> bool:
-    """Alta (o actualización) de un vigilado. Upsert por (ean, proveedor)."""
+           precio_neto=None, coste_real=None,
+           ean_expositor: str | None = None) -> bool:
+    """Alta (o actualización) de un vigilado. Upsert por (ean, proveedor).
+
+    'ean' es el de PrestaShop; 'ean_expositor' (opcional) el del proveedor."""
     if not activo() or not ean:
         return False
     fila = {"ean": str(ean), "proveedor": normalizar_proveedor(proveedor),
             "origen": origen, "activo": True}
+    if ean_expositor is not None:
+        fila["ean_expositor"] = str(ean_expositor).strip() or None
     if nombre is not None:
         fila["nombre"] = nombre
     if id_prestashop is not None:
@@ -293,14 +312,15 @@ _pool = ThreadPoolExecutor(max_workers=6)
 
 
 def _comprobar_uno(v: dict) -> dict:
-    ean = v.get("ean")
+    ean = v.get("ean")                 # clave (EAN de PrestaShop)
+    ean_prov = ean_consulta(v)         # con el que se pregunta al proveedor
     prov = normalizar_proveedor(v.get("proveedor"))
     estado_previo = v.get("estado")
     try:
         if prov == "AZETA":
-            norm = bc.norm_azeta(bc.buscar_azeta(ean))
+            norm = bc.norm_azeta(bc.buscar_azeta(ean_prov))
         else:
-            norm = bc.norm_cs(bc.buscar_cs(ean))
+            norm = bc.norm_cs(bc.buscar_cs(ean_prov))
     except Exception as e:  # noqa: BLE001
         return {"ean": ean, "proveedor": prov, "error": str(e)}
 
@@ -316,7 +336,9 @@ def _comprobar_uno(v: dict) -> dict:
     incidencia = None
     if estado != "disponible" and estado_previo != estado:
         incidencia = {"ean": ean, "proveedor": prov, "estado": estado, "nombre": nombre}
-    return {"ean": ean, "proveedor": prov, "estado": estado, "nombre": nombre,
+    return {"ean": ean, "ean_expositor": v.get("ean_expositor"),
+            "ean_consultado": ean_prov,
+            "proveedor": prov, "estado": estado, "nombre": nombre,
             "stock": norm.get("stock"), "precio_neto": norm.get("precio_neto"),
             "coste_real": norm.get("coste_real"), "incidencia": incidencia}
 
@@ -338,7 +360,8 @@ def cambiar_proveedor(ean: str, proveedor_viejo: str, proveedor_nuevo: str) -> b
     if not row:
         return False
     ok = añadir(ean, nuevo, nombre=row.get("nombre"), origen=row.get("origen") or "manual",
-                id_prestashop=row.get("id_prestashop"))
+                id_prestashop=row.get("id_prestashop"),
+                ean_expositor=row.get("ean_expositor"))
     if not ok:
         return False
     quitar(ean, viejo)
@@ -368,9 +391,14 @@ def comprobar_todos(proveedor: str | None = None) -> dict:
 # Edición (con empuje a PrestaShop) y sincronización bidireccional
 # --------------------------------------------------------------------------- #
 def editar(ean: str, proveedor: str, nuevo_nombre: str | None = None,
-           nuevo_ean: str | None = None, empujar_ps: bool = True) -> dict:
-    """Edita nombre y/o EAN de un vigilado. Si tiene id_prestashop y empujar_ps,
-    actualiza también el producto en PrestaShop (para mantener ambos iguales)."""
+           nuevo_ean: str | None = None, nuevo_ean_expositor: str | None = None,
+           empujar_ps: bool = True) -> dict:
+    """Edita nombre, EAN y/o EAN de expositor de un vigilado.
+
+    'nuevo_ean' es el EAN de PrestaShop (clave de la fila). 'nuevo_ean_expositor'
+    es el del proveedor: None = no tocar, cadena vacía = quitarlo.
+    Si la fila tiene id_prestashop y empujar_ps, se actualiza también en
+    PrestaShop (para mantener ambos iguales)."""
     prov = normalizar_proveedor(proveedor)
     row = obtener(ean, prov)
     if not row:
@@ -378,6 +406,9 @@ def editar(ean: str, proveedor: str, nuevo_nombre: str | None = None,
 
     nuevo_ean = (nuevo_ean or "").strip() or None
     nuevo_nombre = (nuevo_nombre if nuevo_nombre is not None else None)
+    exp_actual = (row.get("ean_expositor") or "").strip()
+    exp_nuevo = None if nuevo_ean_expositor is None else nuevo_ean_expositor.strip()
+    cambia_exp = exp_nuevo is not None and exp_nuevo != exp_actual
 
     # 1) Empujar a PrestaShop primero (si procede); si falla, no divergemos.
     if empujar_ps and row.get("id_prestashop"):
@@ -386,6 +417,8 @@ def editar(ean: str, proveedor: str, nuevo_nombre: str | None = None,
             cambios_ps["ean13"] = nuevo_ean
         if nuevo_nombre and nuevo_nombre != (row.get("nombre") or ""):
             cambios_ps["nombre"] = nuevo_nombre
+        if cambia_exp:
+            cambios_ps["ean_expositor"] = exp_nuevo
         if cambios_ps:
             try:
                 from prestashop_client import PrestashopClient
@@ -399,6 +432,8 @@ def editar(ean: str, proveedor: str, nuevo_nombre: str | None = None,
         cambios["nombre"] = nuevo_nombre
     if nuevo_ean and nuevo_ean != str(row.get("ean")):
         cambios["ean"] = nuevo_ean
+    if cambia_exp:
+        cambios["ean_expositor"] = exp_nuevo or None
     if cambios:
         _patch(ean, prov, cambios)
     return {"ok": True}
@@ -408,7 +443,8 @@ def _filas_con_ps() -> list[dict]:
     """Filas del monitor que están enlazadas a un producto de PrestaShop."""
     if not activo():
         return []
-    params = {"select": "ean,proveedor,nombre,id_prestashop", "id_prestashop": "not.is.null", "limit": "10000"}
+    params = {"select": "ean,ean_expositor,proveedor,nombre,id_prestashop",
+              "id_prestashop": "not.is.null", "limit": "10000"}
     try:
         r = requests.get(_url(TABLA), params=params, headers=_headers(), timeout=_TIMEOUT)
         return r.json() if r.status_code < 300 else []
@@ -418,8 +454,8 @@ def _filas_con_ps() -> list[dict]:
 
 def sincronizar_desde_prestashop() -> dict:
     """Bidireccional (PS -> monitor): trae los productos de PrestaShop; a los ya
-    enlazados por id les actualiza EAN/nombre, y añade los que no estén vigilados.
-    Devuelve {añadidos, actualizados}."""
+    enlazados por id les actualiza EAN / EAN de expositor / nombre, y añade los
+    que no estén vigilados. Devuelve {añadidos, actualizados}."""
     from prestashop_client import PrestashopClient
     productos = PrestashopClient().listar_productos()
     por_id = {}
@@ -432,6 +468,10 @@ def sincronizar_desde_prestashop() -> dict:
     for p in productos:
         pid = p.get("id") or p.get("id_product")
         ean = p.get("ean13") or p.get("ean")
+        # Solo si el módulo de PrestaShop ya devuelve el campo: así una versión
+        # antigua del módulo no borra los EAN de expositor puestos a mano.
+        trae_exp = "ean_expositor" in p
+        exp = (p.get("ean_expositor") or "").strip()
         nombre = p.get("nombre")
         row = por_id.get(int(pid)) if pid is not None else None
         if row:
@@ -440,10 +480,14 @@ def sincronizar_desde_prestashop() -> dict:
                 cambios["ean"] = str(ean)
             if nombre and (row.get("nombre") or "") != nombre:
                 cambios["nombre"] = nombre
+            # El EAN de expositor manda desde PrestaShop (incluido quitarlo).
+            if trae_exp and exp != (row.get("ean_expositor") or "").strip():
+                cambios["ean_expositor"] = exp or None
             if cambios:
                 _patch(row["ean"], row["proveedor"], cambios)
                 actualizados += 1
         elif ean:
-            if añadir(ean, "AZETA", nombre=nombre, origen="prestashop", id_prestashop=pid):
+            if añadir(ean, "AZETA", nombre=nombre, origen="prestashop",
+                      id_prestashop=pid, ean_expositor=(exp or None) if trae_exp else None):
                 añadidos += 1
     return {"añadidos": añadidos, "actualizados": actualizados}

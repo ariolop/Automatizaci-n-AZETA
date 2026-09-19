@@ -1,7 +1,12 @@
 <?php
 /**
  * Front controller: listado
- * Devuelve los productos de la tienda (id, ean13, nombre, fabricante, activo).
+ * Devuelve los productos de la tienda (id, ean13, ean_expositor, nombre,
+ * fabricante, activo).
+ *
+ * 'ean_expositor' es el EAN con el que el proveedor (AZETA / Liderpapel) vende
+ * el producto cuando no coincide con el EAN13 de la tienda. Vive en la tabla
+ * `<prefijo>apl_product_expositor`; si esa tabla no existe, se devuelve ''.
  *
  * Endpoint:
  *   {shop}/index.php?fc=module&module=aplproveedoresconector&controller=listado
@@ -36,8 +41,10 @@ class AplproveedoresconectorListadoModuleFrontController extends ModuleFrontCont
 
         $idLang = (int) Configuration::get('PS_LANG_DEFAULT');
         $soloConEan = !isset($in['solo_con_ean']) || $in['solo_con_ean'];
+        $tablaExp = $this->module->tablaExpositor();
 
-        $sql = 'SELECT p.id_product, p.ean13, p.active, pl.name, m.name AS fabricante
+        $sql = 'SELECT p.id_product, p.ean13, p.active, pl.name, m.name AS fabricante'
+             . ($tablaExp ? ', ex.ean_expositor' : '') . '
                 FROM ' . _DB_PREFIX_ . 'product p
                 JOIN ' . _DB_PREFIX_ . 'product_lang pl
                   ON pl.id_product = p.id_product AND pl.id_lang = ' . $idLang . '
@@ -45,6 +52,9 @@ class AplproveedoresconectorListadoModuleFrontController extends ModuleFrontCont
                   ON m.id_manufacturer = p.id_manufacturer';
         if (Shop::isFeatureActive()) {
             $sql .= ' AND pl.id_shop = ' . (int) Context::getContext()->shop->id;
+        }
+        if ($tablaExp) {
+            $sql .= ' LEFT JOIN ' . $tablaExp . ' ex ON ex.id_product = p.id_product';
         }
         if ($soloConEan) {
             $sql .= " WHERE p.ean13 <> ''";
@@ -58,6 +68,8 @@ class AplproveedoresconectorListadoModuleFrontController extends ModuleFrontCont
             $item = [
                 'id' => (int) $r['id_product'],
                 'ean13' => $r['ean13'],
+                'ean_expositor' => isset($r['ean_expositor']) && $r['ean_expositor'] !== null
+                    ? (string) $r['ean_expositor'] : '',
                 'nombre' => $r['name'],
                 'fabricante' => $r['fabricante'] !== null ? $r['fabricante'] : '',
                 'activo' => (int) $r['active'] === 1,
