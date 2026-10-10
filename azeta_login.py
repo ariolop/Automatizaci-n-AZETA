@@ -68,6 +68,60 @@ class AzetaError(Exception):
     """Error de autenticación o conexión con AZETA."""
 
 
+# --------------------------------------------------------------------------- #
+# Limitador de ritmo (Cloudflare)
+# --------------------------------------------------------------------------- #
+# La web de AZETA está detrás de Cloudflare: con más de ~10 peticiones seguidas a
+# más de 1 cada 2 s responde 429 "Just a moment..." (medido el 2026-10-10; el
+# bloqueo dura ~5 s). Antes eso se leía como "producto no encontrado".
+# Cubo de fichas común a todo el proceso: ráfaga corta (una búsqueda suelta va
+# igual de rápida) y, en sostenido, 1 petición cada 2 s.
+import threading as _threading
+import time as _time
+
+
+class _Limitador:
+    def __init__(self, capacidad: float = 6, por_segundo: float = 0.5):
+        self.capacidad = capacidad
+        self.ritmo = por_segundo
+        self.fichas = capacidad
+        self.t = _time.monotonic()
+        self.lock = _threading.Lock()
+
+    def esperar(self) -> None:
+        while True:
+            with self.lock:
+                ahora = _time.monotonic()
+                self.fichas = min(self.capacidad, self.fichas + (ahora - self.t) * self.ritmo)
+                self.t = ahora
+                if self.fichas >= 1:
+                    self.fichas -= 1
+                    return
+                falta = (1 - self.fichas) / self.ritmo
+            _time.sleep(falta)
+
+    def vaciar(self) -> None:
+        """Tras un 429: no volver a disparar hasta recargar fichas."""
+        with self.lock:
+            self.fichas = 0
+            self.t = _time.monotonic()
+
+
+LIMITADOR = _Limitador()
+ESPERAS_429 = (4, 8)          # segundos antes de cada reintento tras un 429
+
+
+def es_bloqueo_cloudflare(resp) -> bool:
+    if resp.status_code == 429:
+        return True
+    if resp.status_code in (403, 503):
+        try:
+            return "Just a moment" in (resp.text or "")[:3000]
+        except Exception:  # noqa: BLE001
+            return False
+    return False
+
+
 class AzetaSession:
     """Sesión autenticada contra el portal de AZETA."""
 
@@ -112,9 +166,11 @@ class AzetaSession:
         for intento in range(1, reintentos + 1):
             try:
                 # 1) Visita inicial para obtener/refrescar cookies de sesión
+                LIMITADOR.esperar()
                 self.session.get(INDEX_URL, timeout=timeout)
 
                 # 2) POST del formulario de identificación
+                LIMITADOR.esperar()
                 resp = self.session.post(
                     self.login_url,
                     data=datos,
@@ -133,6 +189,10 @@ class AzetaSession:
 
             location = resp.headers.get("Location", "")
             ultimo_estado = resp.status_code
+            if es_bloqueo_cloudflare(resp):
+                LIMITADOR.vaciar()
+                time.sleep(ESPERAS_429[min(intento - 1, len(ESPERAS_429) - 1)])
+                continue
 
             # Credenciales incorrectas: no tiene sentido reintentar
             if "fr_mensaje=1" in location:
@@ -147,6 +207,7 @@ class AzetaSession:
                         location if location.startswith("http") else self.base_url + location
                     )
                     try:
+                        LIMITADOR.esperar()
                         self.session.get(destino, timeout=timeout)
                     except requests.exceptions.RequestException:
                         pass  # la sesión ya está autenticada por cookies
@@ -211,16 +272,50 @@ class AzetaSession:
     def _enviar(self, metodo: str, url: str, reintentos: int, **kwargs):
         import time
         ultimo_error = None
-        for intento in range(1, reintentos + 1):
+        bloqueos = 0
+        intento = 0
+        while intento < reintentos:
+            intento += 1
             try:
-                return self.session.request(metodo, url, **kwargs)
+                # Sin seguir redirecciones automáticamente: así cada salto
+                # (listaLibros -> detalle.php) pasa también por el limitador y
+                # se detecta un 429 en cualquiera de ellos.
+                resp = self._con_redirecciones(metodo, url, **kwargs)
             except requests.exceptions.RequestException as e:
                 ultimo_error = e
                 if intento < reintentos:
                     time.sleep(1.0 * intento)
+                continue
+            if es_bloqueo_cloudflare(resp):
+                LIMITADOR.vaciar()
+                if bloqueos < len(ESPERAS_429):
+                    time.sleep(ESPERAS_429[bloqueos])
+                    bloqueos += 1
+                    intento -= 1          # un 429 no gasta reintento de red
+                    continue
+                raise AzetaError("AZETA está limitando las consultas (demasiadas seguidas). "
+                                 "Espera unos segundos y vuelve a intentarlo.")
+            return resp
         raise AzetaError(
             "AZETA no respondió a tiempo (timeout/red). Inténtalo de nuevo en unos segundos."
         ) from ultimo_error
+
+    def _con_redirecciones(self, metodo: str, url: str, **kwargs):
+        from urllib.parse import urljoin
+        kwargs = dict(kwargs)
+        kwargs["allow_redirects"] = False
+        for _ in range(6):
+            LIMITADOR.esperar()
+            resp = self.session.request(metodo, url, **kwargs)
+            if resp.status_code in (301, 302, 303, 307, 308) and resp.headers.get("Location"):
+                url = urljoin(resp.url or url, resp.headers["Location"])
+                if resp.status_code in (301, 302, 303):
+                    metodo = "GET"
+                    kwargs.pop("data", None)
+                    kwargs.pop("json", None)
+                continue
+            return resp
+        return resp
 
     def get(self, url: str, **kwargs):
         """GET autenticado con reintentos ante timeouts."""
