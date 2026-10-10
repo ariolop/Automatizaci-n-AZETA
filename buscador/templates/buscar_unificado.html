@@ -388,7 +388,24 @@ function render(d){
         <button class="pub" onclick="publicar(this,${ja(provSlug)},${ja(eanLoc)})">Publicar en PrestaShop</button>`;
       }
     }
-    const vigilarBtn = `<button class="pub vigilar-btn" style="margin-top:8px" onclick="monitorizar(this,${ja(provSlug)},${ja(eanLoc)},${ja(p.nombre||"")})">👁 Vigilar en el monitor</button>`;
+    // ¿Ya está en el monitor con ESTE proveedor? (por su EAN, el buscado, el de
+    // PrestaShop o como EAN expositor)
+    const provNom = cls==='azeta' ? 'AZETA' : 'Liderpapel';
+    const eansProd = new Set([p.ean, d.ean, d.ps && d.ps.ean13, d.ps && d.ps.ean_expositor].filter(Boolean).map(String));
+    const enMon = (d.vigilados||[]).find(v => v.proveedor===provNom &&
+      (eansProd.has(String(v.ean)) || (v.ean_expositor && eansProd.has(String(v.ean_expositor)))));
+    const otroMon = !enMon && (d.vigilados||[]).find(v => v.proveedor!==provNom &&
+      (eansProd.has(String(v.ean)) || (v.ean_expositor && eansProd.has(String(v.ean_expositor)))));
+    const urlMon = v => `/monitor/?q=${encodeURIComponent(v.ean)}`;
+    let vigilarBtn;
+    if(enMon && enMon.activo !== false){
+      const rev = enMon.ultima_revision ? ` · revisado ${esc(String(enMon.ultima_revision).slice(0,16).replace('T',' '))}` : ' · sin comprobar aún';
+      vigilarBtn = `<div class="msg ok" style="margin-top:8px">👁 Ya está en el monitor${enMon.estado?` · <b>${esc(enMon.estado)}</b>`:''}${rev} · <a style="color:inherit" href="${urlMon(enMon)}">ver</a></div>`;
+    }else{
+      const nota = enMon ? `<div class="msg info" style="margin-top:8px">Está en el monitor pero desactivado (ya no estaba en PrestaShop).</div>`
+        : (otroMon ? `<div class="msg info" style="margin-top:8px">Vigilado con ${esc(otroMon.proveedor)}, no con ${provNom}.</div>` : '');
+      vigilarBtn = nota + `<button class="pub vigilar-btn" style="margin-top:8px" onclick="monitorizar(this,${ja(provSlug)},${ja(eanLoc)},${ja(p.nombre||"")})">👁 ${enMon ? 'Volver a vigilar' : 'Vigilar en el monitor'}</button>`;
+    }
     const avisoEan = p.ean_no_coincide
       ? `<div class="msg err">⚠ El EAN de esta ficha no coincide con el buscado. Revisa que sea el producto correcto antes de publicar.</div>`
       : (p.buscado_con

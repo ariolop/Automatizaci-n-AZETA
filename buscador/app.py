@@ -63,6 +63,9 @@ def api_buscar():
     res["ok"] = True
     res["ya_prestashop"] = bc.ya_en_prestashop_varios(eans)
     res["ps"] = ps
+    # ¿Ya está en el monitor? (por el EAN buscado, los de las fichas y los de PrestaShop)
+    res["vigilados"] = mon.filas_por_eans(
+        [ean, *eans, (ps or {}).get("ean13"), (ps or {}).get("ean_expositor")])
     res["ps_ok"] = bc.prestashop_configurado()
     return jsonify(res)
 

@@ -197,6 +197,23 @@ def listar_pagina(proveedor: str | None = None, estado: str | None = None,
             "por_pagina": por_pagina, "paginas": paginas}
 
 
+def filas_por_eans(eans: list) -> list[dict]:
+    """Filas del monitor cuyo EAN o EAN de expositor es alguno de 'eans'
+    (para que /buscar indique si el producto ya está vigilado)."""
+    eans = [e for e in dict.fromkeys("".join(ch for ch in str(x or "") if ch.isdigit()) for x in eans) if e]
+    if not activo() or not eans:
+        return []
+    lista = ",".join(eans)
+    params = {"select": "ean,ean_expositor,proveedor,estado,activo,ultima_revision,coste_real",
+              "or": f"(ean.in.({lista}),ean_expositor.in.({lista}))", "limit": "50"}
+    try:
+        r = requests.get(_url(TABLA), params=params, headers=_headers(), timeout=_TIMEOUT)
+        return r.json() if r.status_code < 300 else []
+    except Exception as e:  # noqa: BLE001
+        print(f"[monitor] no se pudo consultar vigilados: {e}")
+        return []
+
+
 def obtener(ean: str, proveedor: str) -> dict | None:
     if not activo():
         return None
