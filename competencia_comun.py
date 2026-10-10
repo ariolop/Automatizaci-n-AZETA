@@ -120,17 +120,14 @@ def guardar_filas(run_id: str, filas: list[dict]) -> bool:
     return ok
 
 
-def resultados_de_run(run_id: str, limite: int = 5000) -> list[dict]:
+def resultados_de_run(run_id: str, limite: int | None = None) -> list[dict]:
+    """Todas las filas de una revisión (paginando: Supabase corta en 1000)."""
     if not activo():
         return []
-    try:
-        r = requests.get(_url(TABLA),
-                        params={"select": "*", "run_id": f"eq.{run_id}",
-                                "order": "ean.asc,tienda.asc", "limit": str(limite)},
-                        headers=_headers(), timeout=_TIMEOUT)
-        return r.json() if r.status_code < 300 else []
-    except Exception:  # noqa: BLE001
-        return []
+    from supabase_paginado import get_todos
+    return get_todos(_url(TABLA), {"select": "*", "run_id": f"eq.{run_id}",
+                                   "order": "ean.asc,tienda.asc,id.asc"},
+                     _headers(), maximo=limite) or []
 
 
 def historico_de_ean(ean: str, limite: int = 500) -> list[dict]:
@@ -138,11 +135,13 @@ def historico_de_ean(ean: str, limite: int = 500) -> list[dict]:
     if not activo():
         return []
     try:
+        # Las MÁS RECIENTES (antes: las 500 más antiguas, y la gráfica se
+        # quedaba congelada); se devuelven en orden cronológico.
         r = requests.get(_url(TABLA),
                         params={"select": "ts,tienda,precio,pvp,estado,url",
-                                "ean": f"eq.{ean}", "order": "ts.asc", "limit": str(limite)},
+                                "ean": f"eq.{ean}", "order": "ts.desc", "limit": str(limite)},
                         headers=_headers(), timeout=_TIMEOUT)
-        return r.json() if r.status_code < 300 else []
+        return list(reversed(r.json())) if r.status_code < 300 else []
     except Exception:  # noqa: BLE001
         return []
 

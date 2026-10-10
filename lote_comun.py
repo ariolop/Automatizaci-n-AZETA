@@ -58,13 +58,12 @@ def _procesar(jid: str, eans: list[str], op: dict):
 
         # Vigilar (monitor unificado)
         if op.get("vigilar"):
+            # Con los datos ya consultados (coste, precio, stock, estado).
             if azeta and azeta.get("encontrado"):
-                mon.añadir(ean, "AZETA", nombre=azeta.get("nombre"), origen="manual")
+                mon.vigilar_con_ficha(ean, "AZETA", azeta, origen="manual")
                 job["resumen"]["vigilados"] += 1
             if cs and cs.get("encontrado"):
-                mon.añadir(ean, "Liderpapel", nombre=cs.get("nombre"), origen="manual",
-                           stock=cs.get("stock"), precio_neto=cs.get("precio_neto"),
-                           coste_real=cs.get("coste_real"))
+                mon.vigilar_con_ficha(ean, "Liderpapel", cs, origen="manual")
                 job["resumen"]["vigilados"] += 1
 
         # Publicar en PrestaShop (opcional, por proveedor)

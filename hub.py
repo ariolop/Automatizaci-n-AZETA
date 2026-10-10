@@ -128,6 +128,33 @@ def salud():
     return {"ok": True}
 
 
+@hub.route("/cron/comprobar", methods=["GET", "POST"])
+def cron_comprobar():
+    """Para un cron externo (p. ej. el del servidor de PrestaShop cada 5 min):
+    lanza en segundo plano la comprobación de los N vigilados revisados hace más
+    tiempo. Así el monitor se mantiene al día por tandas y, de paso, Render no
+    se duerme. Requiere la variable de entorno CRON_TOKEN (si no, desactivado).
+        GET /cron/comprobar?token=XXXX&n=60"""
+    import hmac
+    from flask import request
+    esperado = os.environ.get("CRON_TOKEN", "").strip()
+    dado = (request.args.get("token") or request.headers.get("X-Cron-Token") or "").strip()
+    if not esperado or not hmac.compare_digest(esperado, dado):
+        return {"ok": False, "error": "No autorizado"}, 403
+    import monitor_comun as mon
+    if not mon.activo():
+        return {"ok": False, "error": "Monitor (Supabase) sin configurar."}, 503
+    try:
+        n = max(1, min(500, int(request.args.get("n", 60))))
+    except ValueError:
+        n = 60
+    r = mon.iniciar_comprobacion(maximo=n, origen="cron")
+    j = mon.estado_comprobacion()
+    return {"ok": True, "iniciado": bool(r.get("ok")), "estado": j.get("estado"),
+            "total": j.get("total"), "hechos": j.get("hechos"),
+            "incidencias": j.get("n_incidencias")}
+
+
 # --------------------------------------------------------------------------- #
 # Login / logout (sesión por cookie firmada; usuarios en Supabase).
 # --------------------------------------------------------------------------- #
@@ -179,7 +206,20 @@ _mounted = DispatcherMiddleware(hub, {
 # de usuarios no está configurado (p. ej. en local sin credenciales), el
 # conjunto queda abierto para no bloquear el desarrollo.
 # --------------------------------------------------------------------------- #
-_LIBRES = ("/login", "/logout", "/salud")
+_LIBRES = ("/login", "/logout", "/salud", "/cron/comprobar")
+
+
+def _quiere_json(environ, path: str) -> bool:
+    """Peticiones hechas desde JavaScript (fetch): con la sesión caducada deben
+    recibir un 401 en JSON, no la página de login (daba "Unexpected token <")."""
+    if environ.get("REQUEST_METHOD", "GET").upper() != "GET":
+        # Los formularios HTML (urlencoded / multipart) sí van al login.
+        ct = environ.get("CONTENT_TYPE", "")
+        if "form-urlencoded" not in ct and "multipart/form-data" not in ct:
+            return True
+    if "/api/" in path or path.endswith("/api") or path.endswith("/opciones") or path.endswith("/estado"):
+        return True
+    return "application/json" in environ.get("HTTP_ACCEPT", "")
 
 
 def _cookie_de(environ) -> str | None:
@@ -200,11 +240,12 @@ def application(environ, start_response):
     if auth.activo() and path not in _LIBRES:
         usuario = auth.validar_cookie(_cookie_de(environ))
         if not usuario:
-            # API -> 401 JSON; navegación -> redirección a /login
-            if "/api/" in path or path.endswith("/api"):
+            # fetch/API -> 401 JSON; navegación -> redirección a /login
+            if _quiere_json(environ, path):
                 start_response("401 Unauthorized",
                                [("Content-Type", "application/json; charset=utf-8")])
-                return [b'{"ok":false,"error":"No autorizado"}']
+                return ['{"ok":false,"error":"Tu sesión ha caducado: recarga la página para volver a entrar."}'
+                        .encode("utf-8")]
             destino = "/login?next=" + quote(path)
             start_response("302 Found",
                            [("Location", destino), ("Content-Type", "text/html; charset=utf-8")])

@@ -138,18 +138,13 @@ def quitar_muchos(ids: list) -> bool:
     return ok
 
 
-def listar(limite: int = 10000) -> list[dict]:
-    """Devuelve el catálogo guardado (para precargar la selección)."""
+def listar(limite: int | None = None) -> list[dict] | None:
+    """Devuelve el catálogo guardado (para precargar la selección), COMPLETO
+    (paginando: Supabase corta en 1000). None si no se pudo leer: así la
+    pantalla no interpreta un fallo como "otra persona lo ha desmarcado todo"."""
     if not activo():
         return []
-    try:
-        r = requests.get(
-            _url(),
-            params={"select": "id_prestashop,ean13,tiene_ean,nombre,fabricante,precio,activo_ps",
-                    "order": "fabricante.asc,nombre.asc", "limit": str(limite)},
-            headers=_headers(),
-            timeout=_TIMEOUT,
-        )
-        return r.json() if r.status_code < 300 else []
-    except Exception:  # noqa: BLE001
-        return []
+    from supabase_paginado import get_todos
+    return get_todos(_url(), {"select": "id_prestashop,ean13,tiene_ean,nombre,fabricante,precio,activo_ps",
+                              "order": "fabricante.asc,nombre.asc,id.asc"},
+                     _headers(), maximo=limite)

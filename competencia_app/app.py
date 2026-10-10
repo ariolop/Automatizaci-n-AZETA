@@ -150,7 +150,7 @@ def iniciar():
         eans = list(mapa.keys())
     elif fuente == "vigilados":
         import monitor_comun as mon
-        vig = {str(v.get("ean")) for v in mon.listar(limite=10000) if v.get("ean")}
+        vig = {str(v.get("ean")) for v in mon.listar() if v.get("ean")}
         eans = [e for e in mapa.keys() if e in vig] if mapa else list(vig)
     else:  # lista pegada
         eans = list(dict.fromkeys(re.findall(r"\d{8,14}", request.form.get("texto") or "")))

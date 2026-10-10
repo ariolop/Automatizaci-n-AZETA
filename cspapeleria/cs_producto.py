@@ -32,12 +32,24 @@ APLICAR_RECARGO = os.environ.get("CS_APLICAR_RECARGO", "1") not in ("0", "false"
 RECARGO_POR_IVA = {21: 5.2, 10: 1.4, 5: 0.62, 4: 0.5, 0: 0.0}
 
 
+def _aplicar_recargo() -> bool:
+    """Mismo interruptor que AZETA (APLICAR_RECARGO de la configuración común),
+    para que la comparación entre proveedores sea coherente."""
+    try:
+        import config as _cfg   # config.py de la raíz del hub
+        if hasattr(_cfg, "aplicar_recargo"):
+            return bool(_cfg.aplicar_recargo())
+    except Exception:  # noqa: BLE001
+        pass
+    return APLICAR_RECARGO
+
+
 def calcular_coste(precio_neto, iva=None):
     """coste_real = precio_neto * (1 + (IVA + recargo)/100)."""
     if precio_neto is None:
         return None, None, None
     iva = IVA_DEFAULT if iva is None else float(iva)
-    recargo = RECARGO_POR_IVA.get(int(iva), 0.0) if APLICAR_RECARGO else 0.0
+    recargo = RECARGO_POR_IVA.get(int(iva), 0.0) if _aplicar_recargo() else 0.0
     coste = round(precio_neto * (1 + (iva + recargo) / 100), 4)
     return coste, iva, recargo
 

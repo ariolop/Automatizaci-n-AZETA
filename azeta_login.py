@@ -88,9 +88,11 @@ class AzetaSession:
         self.session = requests.Session()
         self.session.headers.update({"User-Agent": USER_AGENT})
         self.autenticado = False
+        self._detectar_login = True
+        self._sin_deteccion_desde = 0.0
 
     # ------------------------------------------------------------------ #
-    def login(self, timeout: int = 30, reintentos: int = 4) -> bool:
+    def login(self, timeout=(8, 25), reintentos: int = 3) -> bool:
         """Autentica la sesión. Devuelve True o lanza AzetaError.
 
         El servidor de AZETA es lento e intermitente: a veces devuelve 404 en el
@@ -165,13 +167,48 @@ class AzetaSession:
         )
 
     # ------------------------------------------------------------------ #
+    @staticmethod
+    def parece_login(resp) -> bool:
+        """True si la respuesta es la pantalla de login/pública (sesión caducada):
+        el formulario de identificación (fr_nombre) o el botón público de acceso."""
+        try:
+            txt = resp.text or ""
+        except Exception:  # noqa: BLE001
+            return False
+        return 'name="fr_clave"' in txt          # campo contraseña del login
+
     def _peticion(self, metodo: str, url: str, reintentos: int = 3, **kwargs):
-        """Realiza una petición autenticada reintentando ante timeouts/red."""
+        """Realiza una petición autenticada reintentando ante timeouts/red.
+
+        Si AZETA devuelve la pantalla de login (sesión caducada) se vuelve a
+        iniciar sesión UNA vez y se repite la petición. Un 5xx lanza AzetaError,
+        para que quien llama lo trate como "AZETA no disponible" y no como
+        "producto no encontrado"."""
         if not self.autenticado:
             raise AzetaError("La sesión no está autenticada. Llama a login() primero.")
         if not url.startswith("http"):
             url = self.base_url + ("" if url.startswith("/") else "/") + url
-        kwargs.setdefault("timeout", 30)
+        kwargs.setdefault("timeout", (8, 25))     # (conexión, lectura)
+        resp = self._enviar(metodo, url, reintentos, **kwargs)
+        import time as _t
+        detectar = self._detectar_login or (_t.time() - self._sin_deteccion_desde > 3600)
+        if resp.status_code in (401, 403) or (detectar and self.parece_login(resp)):
+            self.autenticado = False
+            self.login()                          # lanza AzetaError si no puede
+            resp = self._enviar(metodo, url, reintentos, **kwargs)
+            if resp.status_code in (401, 403):
+                raise AzetaError("AZETA rechaza la sesión (HTTP %s)." % resp.status_code)
+            if self.parece_login(resp):
+                # Recién logueados y sigue saliendo el formulario: esa página lo
+                # incluye siempre. Dejamos de usar esta detección para no hacer
+                # un login en cada petición.
+                self._detectar_login = False
+                self._sin_deteccion_desde = _t.time()
+        if resp.status_code >= 500:
+            raise AzetaError(f"AZETA respondió con un error (HTTP {resp.status_code}).")
+        return resp
+
+    def _enviar(self, metodo: str, url: str, reintentos: int, **kwargs):
         import time
         ultimo_error = None
         for intento in range(1, reintentos + 1):
@@ -179,7 +216,8 @@ class AzetaSession:
                 return self.session.request(metodo, url, **kwargs)
             except requests.exceptions.RequestException as e:
                 ultimo_error = e
-                time.sleep(1.5 * intento)
+                if intento < reintentos:
+                    time.sleep(1.0 * intento)
         raise AzetaError(
             "AZETA no respondió a tiempo (timeout/red). Inténtalo de nuevo en unos segundos."
         ) from ultimo_error

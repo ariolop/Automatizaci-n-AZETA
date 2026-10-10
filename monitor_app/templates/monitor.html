@@ -18,6 +18,7 @@
   a.lnk,button.lnk{color:var(--muted);text-decoration:none;font-size:13px;border:1px solid var(--line);
        padding:7px 11px;border-radius:9px;background:var(--panel2);cursor:pointer}
   a.lnk:hover,button.lnk:hover{color:#fff;border-color:var(--accent)}
+  button.lnk:disabled{opacity:.45;cursor:default}
   main{max-width:1100px;margin:0 auto;padding:20px}
   .cards{display:flex;gap:12px;flex-wrap:wrap;margin-bottom:16px}
   .stat{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:12px 16px;min-width:120px}
@@ -65,6 +66,18 @@
   td.acciones form{display:inline;margin:0}
   .vacio{color:var(--muted);text-align:center;padding:36px}
   .warnbox{background:rgba(244,197,66,.12);color:var(--warn);border-radius:10px;padding:12px 14px;margin-bottom:14px;font-size:14px}
+  a.stat{color:inherit;text-decoration:none} a.stat:hover{border-color:var(--accent)}
+  .job{background:var(--panel);border:1px solid var(--line);border-left:3px solid var(--accent);border-radius:12px;padding:12px 14px;margin-bottom:14px}
+  .job.fin{border-left-color:var(--ok)} .job.err{border-left-color:var(--err)}
+  .job .top{display:flex;gap:10px;align-items:center;flex-wrap:wrap;font-size:14px}
+  .job .top .sp{flex:1}
+  .prog{height:8px;background:var(--panel2);border-radius:6px;overflow:hidden;margin:10px 0 4px}
+  .prog i{display:block;height:100%;background:var(--accent);width:0;transition:width .4s}
+  .job.fin .prog i{background:var(--ok)}
+  .job table{margin-top:10px;font-size:13px}
+  .job td,.job th{padding:6px 10px}
+  .spin{display:inline-block;width:12px;height:12px;border:2px solid var(--muted);border-top-color:transparent;border-radius:50%;animation:g .8s linear infinite;vertical-align:-2px}
+  @keyframes g{to{transform:rotate(360deg)}}
 </style>
 </head>
 <body>
@@ -74,7 +87,8 @@
   <span class="sp"></span>
   <form method="post" action="{{ request.script_root }}/comprobar" style="margin:0">
     {% if filtro_proveedor %}<input type="hidden" name="proveedor" value="{{ filtro_proveedor }}">{% endif %}
-    <button class="lnk" type="submit">↻ Comprobar {{ 'filtrados' if filtro_proveedor else 'todos' }}</button>
+    {% if filtro_estado %}<input type="hidden" name="estado" value="{{ filtro_estado }}">{% endif %}
+    <button class="lnk" type="submit" id="btnComprobar" {{ 'disabled' if job.estado in ('en_curso','preparando') }}>↻ Comprobar {{ 'filtrados' if (filtro_proveedor or filtro_estado) else 'todos' }}</button>
   </form>
   {% if ps_ok %}
   <form method="post" action="{{ request.script_root }}/sincronizar" style="margin:0">
@@ -91,11 +105,14 @@
     {% for cat, msg in messages %}<div class="flash {{cat}}">{{ msg }}</div>{% endfor %}
   {% endwith %}
 
+  <div id="jobbox"></div>
+
   <div class="cards">
     <div class="stat"><b>{{ resumen.total }}</b><span>vigilados activos</span></div>
-    <div class="stat"><b>{{ resumen.por_proveedor.get('AZETA', 0) }}</b><span>AZETA</span></div>
-    <div class="stat"><b>{{ resumen.por_proveedor.get('Liderpapel', 0) }}</b><span>Liderpapel</span></div>
-    <div class="stat"><b>{{ resumen.incidencias }}</b><span>incidencias</span></div>
+    <a class="stat" href="?proveedor=AZETA"><b>{{ resumen.por_proveedor.get('AZETA', 0) }}</b><span>AZETA</span></a>
+    <a class="stat" href="?proveedor=Liderpapel"><b>{{ resumen.por_proveedor.get('Liderpapel', 0) }}</b><span>Liderpapel</span></a>
+    <a class="stat" href="?estado=incidencias" title="Agotados + desaparecidos"><b style="color:{{ 'var(--err)' if resumen.incidencias else 'inherit' }}">{{ resumen.incidencias }}</b><span>incidencias</span></a>
+    <a class="stat" href="?estado=sin_comprobar" title="Nunca comprobados"><b>{{ resumen.get('sin_comprobar', 0) }}</b><span>sin comprobar</span></a>
   </div>
 
   <div class="bar">
@@ -121,6 +138,8 @@
       <option value="disponible" {{ 'selected' if filtro_estado=='disponible' }}>Disponible</option>
       <option value="agotado" {{ 'selected' if filtro_estado=='agotado' }}>Agotado</option>
       <option value="desaparecido" {{ 'selected' if filtro_estado=='desaparecido' }}>Desaparecido</option>
+      <option value="incidencias" {{ 'selected' if filtro_estado=='incidencias' }}>Incidencias (agotado + desaparecido)</option>
+      <option value="sin_comprobar" {{ 'selected' if filtro_estado=='sin_comprobar' }}>Sin comprobar</option>
     </select>
     <button type="submit">Filtrar</button>
     {% if filtro_proveedor or filtro_estado or q %}<a class="lnk" href="{{ request.script_root }}/">Limpiar</a>{% endif %}
@@ -214,6 +233,62 @@
 </main>
 <script>
 const BASE = "{{ request.script_root }}";
+const escH = s => (s??"").toString().replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+
+// --- Comprobación en segundo plano: progreso + incidencias -------------------
+let JOB = {{ job|tojson }};
+let jobTimer = null;
+function pintarJob(j){
+  const box = document.getElementById('jobbox'); if(!box) return;
+  if(!j || !j.estado || j.estado === 'parado'){ box.innerHTML=''; return; }
+  const enCurso = (j.estado === 'en_curso' || j.estado === 'preparando');
+  const pct = j.total ? Math.round(100 * (j.hechos||0) / j.total) : (enCurso ? 0 : 100);
+  const titulo = enCurso ? '<span class="spin"></span> Comprobando en segundo plano…'
+    : j.estado === 'cancelado' ? 'Comprobación cancelada'
+    : j.estado === 'error' ? 'La comprobación se detuvo por un error'
+    : 'Comprobación terminada';
+  const origen = j.origen === 'cron' ? ' <span class="muted">(automática)</span>' : '';
+  const datos = `${j.hechos||0} / ${j.total||0} · <span style="color:var(--ok)">${j.disponibles||0} disponibles</span> · `
+    + `<span style="color:${j.n_incidencias?'var(--err)':'inherit'}">${j.n_incidencias||0} incidencias nuevas</span> · `
+    + `${j.n_errores||0} errores`;
+  let inc = '';
+  if(j.incidencias && j.incidencias.length){
+    inc = `<table><thead><tr><th>Proveedor</th><th>EAN</th><th>Nombre</th><th>Estado</th></tr></thead><tbody>`
+      + j.incidencias.map(i=>`<tr><td><span class="tag ${escH(i.proveedor)}">${escH(i.proveedor)}</span></td>`
+        + `<td><a style="color:inherit" href="?q=${encodeURIComponent(i.ean)}">${escH(i.ean)}</a></td>`
+        + `<td>${escH(i.nombre||'—')}</td><td><span class="est ${escH(i.estado)}">${escH(i.estado)}</span></td></tr>`).join('')
+      + `</tbody></table>`;
+    if(j.n_incidencias > j.incidencias.length) inc += `<div class="muted" style="margin-top:6px">… y ${j.n_incidencias - j.incidencias.length} más.</div>`;
+  }
+  const errs = (j.errores && j.errores.length && !enCurso)
+    ? `<details style="margin-top:8px"><summary class="muted" style="cursor:pointer">Ver errores (${j.n_errores})</summary>`
+      + j.errores.map(e=>`<div class="muted" style="font-size:12.5px">${escH(e.proveedor)} · ${escH(e.ean)}: ${escH(e.error)}</div>`).join('') + `</details>`
+    : '';
+  box.innerHTML = `<div class="job ${enCurso?'':(j.estado==='error'?'err':'fin')}">
+    <div class="top"><b>${titulo}</b>${origen}<span class="sp"></span>
+      ${enCurso ? '<button class="lnk" type="button" onclick="cancelarJob(this)">Cancelar</button>'
+                : '<a class="lnk" href="?estado=incidencias">Ver todas las incidencias</a> <a class="lnk" href="">Recargar lista</a>'}
+    </div>
+    <div class="prog"><i style="width:${pct}%"></i></div>
+    <div class="muted" style="font-size:13px">${datos}</div>
+    ${inc}${errs}
+  </div>`;
+  const b = document.getElementById('btnComprobar'); if(b) b.disabled = enCurso;
+}
+async function pollJob(){
+  try{
+    const r = await fetch(`${BASE}/comprobacion/estado`); const d = await r.json();
+    if(d.ok){ JOB = d; pintarJob(d); }
+    if(!(d.estado === 'en_curso' || d.estado === 'preparando')){ clearInterval(jobTimer); jobTimer = null; }
+  }catch(e){ /* red intermitente: se reintenta */ }
+}
+async function cancelarJob(btn){
+  btn.disabled = true;
+  try{ await fetch(`${BASE}/comprobacion/cancelar`, {method:'POST'}); }catch(e){}
+  pollJob();
+}
+pintarJob(JOB);
+if(JOB && (JOB.estado === 'en_curso' || JOB.estado === 'preparando')) jobTimer = setInterval(pollJob, 2000);
 
 // --- Ordenación de columnas (sobre las filas de la página actual) -----------
 (function(){

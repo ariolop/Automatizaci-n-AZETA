@@ -117,6 +117,9 @@ def _precio_num(texto: str | None):
     return float(m.group(1).replace(",", ".")) if m else None
 
 
+# IVA que se asume cuando la ficha de AZETA no lo publica.
+IVA_POR_DEFECTO = 21
+
 # Recargo de equivalencia español según el tipo de IVA
 _RECARGO_POR_IVA = {21: 5.2, 10: 1.4, 5: 0.62, 4: 0.5, 0: 0.0}
 
@@ -195,6 +198,11 @@ def parsear_ficha(html: str, ean_buscado: str | None = None, url: str | None = N
     # IVA (% del onclick de "Su PVP") y recargo de equivalencia
     miva = re.search(r"susPVP\('[^']*',\s*'[^']*',\s*'(\d+)'", html)
     iva_pct = int(miva.group(1)) if miva else None
+    # Si la ficha no trae el IVA, se estima al 21 % (lo habitual en papelería):
+    # antes quedaba en 0 y el coste real salía sin IVA ni recargo.
+    iva_estimado = iva_pct is None
+    if iva_estimado:
+        iva_pct = IVA_POR_DEFECTO
     recargo_pct = _recargo_de(iva_pct) if aplicar_recargo else 0.0
 
     # Coste real por unidad = precio_unidad * (1 + IVA% + recargo%)
@@ -268,6 +276,7 @@ def parsear_ficha(html: str, ean_buscado: str | None = None, url: str | None = N
         "es_expositor": unidades_venta > 1,
         # Impuestos y coste real
         "iva_pct": iva_pct,
+        "iva_estimado": iva_estimado,
         "recargo_pct": recargo_pct,
         "coste_real_unidad": coste_real_unidad,
         # PVP recomendado
@@ -293,7 +302,8 @@ def buscar_producto(patron: str, sesion: AzetaSession | None = None,
     if sesion is None:
         sesion = AzetaSession()
         sesion.login()
-    url = BUSCAR_URL.format(patron=patron)
+    from urllib.parse import quote_plus
+    url = BUSCAR_URL.format(patron=quote_plus(str(patron)))
     resp = sesion.get(url)
     datos = parsear_ficha(resp.text, ean_buscado=patron, url=resp.url,
                           aplicar_recargo=aplicar_recargo)

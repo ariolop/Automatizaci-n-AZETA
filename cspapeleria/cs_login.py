@@ -41,7 +41,7 @@ class CSSession:
         self.clave = clave or os.environ.get("CS_PASS")
         if not self.usuario or not self.clave:
             raise CSError("Faltan credenciales: define CS_USER y CS_PASS en .env")
-        self.timeout = int(timeout or os.environ.get("CS_TIMEOUT", 30))
+        self.timeout = int(timeout or os.environ.get("CS_TIMEOUT", 25))
         self.impersonate = impersonate or os.environ.get("CS_IMPERSONATE", "chrome")
         self.reintentos = reintentos
         self._logueado = False
@@ -105,9 +105,32 @@ class CSSession:
     # ------------------------------------------------------------------ #
     # Peticiones ya autenticadas al servlet
     # ------------------------------------------------------------------ #
+    @staticmethod
+    def parece_login(r) -> bool:
+        """True si la respuesta es la pantalla de login (sesión caducada)."""
+        try:
+            if "PublicControlServlet" in (r.url or ""):
+                return True
+            low = (r.text or "").lower()
+        except Exception:  # noqa: BLE001
+            return False
+        return 'type="password"' in low and 'name="user"' in low
+
     def get(self, params, url=None):
+        """GET autenticado. Si la sesión ha caducado (vuelve el login), se
+        inicia sesión de nuevo UNA vez y se repite; un 5xx lanza CSError para
+        que no se confunda con "producto no encontrado"."""
         self.asegurar_login()
-        return self._request("GET", url or self.SERVLET, params=params)
+        r = self._request("GET", url or self.SERVLET, params=params)
+        if r.status_code in (401, 403) or self.parece_login(r):
+            self._logueado = False
+            self.login()
+            r = self._request("GET", url or self.SERVLET, params=params)
+            if r.status_code in (401, 403) or self.parece_login(r):
+                raise CSError("Liderpapel rechaza la sesión (¿credenciales o WAF?).")
+        if r.status_code >= 500:
+            raise CSError(f"Liderpapel respondió con un error (HTTP {r.status_code}).")
+        return r
 
     def get_producto(self, cod_product):
         return self.get({"o": "productb2b", "p": "1", "codProduct": str(cod_product)})

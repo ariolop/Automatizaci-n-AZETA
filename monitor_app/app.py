@@ -61,6 +61,7 @@ def index():
         ps_ok=bc.prestashop_configurado(),
         en_ps=en_ps,
         precios_ps=precios_ps,
+        job=mon.estado_comprobacion(),
     )
 
 
@@ -146,7 +147,7 @@ def add():
                 if mon.añadir(ean, p, origen="manual", ean_expositor=ean_exp))
         extra = f" (se consultará con {ean_exp})" if ean_exp else ""
         flash(f"Añadido «{ean}» a {n} proveedor(es){extra}.", "ok" if n else "error")
-    return redirect(url_for("index"))
+    return redirect(request.referrer or url_for("index"))
 
 
 @app.route("/quitar", methods=["POST"])
@@ -156,21 +157,31 @@ def quitar():
     if ean and proveedor:
         mon.quitar(ean, proveedor)
         flash(f"Quitado «{ean}» ({proveedor}).", "ok")
-    return redirect(url_for("index"))
+    return redirect(request.referrer or url_for("index"))
 
 
 @app.route("/comprobar", methods=["POST"])
 def comprobar():
+    """Lanza la comprobación EN SEGUNDO PLANO (la página muestra el progreso)."""
     proveedor = request.form.get("proveedor") or None
-    try:
-        res = mon.comprobar_todos(proveedor=proveedor)
-        inc = res["incidencias"]
-        msg = (f"Comprobados {res['comprobados']} · disponibles {res['disponibles']} · "
-               f"incidencias {len(inc)} · errores {len(res['errores'])}")
-        flash(msg, "ok" if not inc else "warn")
-    except Exception as e:  # noqa: BLE001
-        flash(f"Error al comprobar: {e}", "error")
-    return redirect(url_for("index"))
+    estado = request.form.get("estado") or None
+    r = mon.iniciar_comprobacion(proveedor=proveedor, estado=estado)
+    if r.get("ok"):
+        flash(f"Comprobación iniciada: {r['total']} productos. Puedes seguir usando la app; "
+              f"el progreso se ve aquí arriba.", "ok")
+    else:
+        flash(r.get("error") or "No se pudo iniciar la comprobación.", "warn")
+    return redirect(request.referrer or url_for("index"))
+
+
+@app.route("/comprobacion/estado")
+def comprobacion_estado():
+    return jsonify({"ok": True, **mon.estado_comprobacion()})
+
+
+@app.route("/comprobacion/cancelar", methods=["POST"])
+def comprobacion_cancelar():
+    return jsonify({"ok": mon.cancelar_comprobacion()})
 
 
 @app.route("/sincronizar", methods=["POST"])
@@ -178,7 +189,8 @@ def sincronizar():
     try:
         r = mon.sincronizar_desde_prestashop()
         flash(f"Sincronizado con PrestaShop · {r['añadidos']} añadidos · "
-              f"{r['actualizados']} actualizados (EAN/nombre).", "ok")
+              f"{r['actualizados']} actualizados · "
+              f"{r.get('desactivados', 0)} desactivados (ya no están en la tienda).", "ok")
     except Exception as e:  # noqa: BLE001
         flash(f"No se pudo sincronizar con PrestaShop: {e}", "error")
     return redirect(url_for("index"))

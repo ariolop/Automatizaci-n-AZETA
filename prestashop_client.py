@@ -24,6 +24,21 @@ class PrestashopError(Exception):
     pass
 
 
+import re as _re
+import time as _time
+
+_CACHE_OPC = {"t": 0.0, "datos": None}
+_RE_21 = _re.compile(r"(?<![\d.,])21(?:[.,]0+)?\s*%")
+
+
+def _limpiar_nombre(txt, maximo: int) -> str | None:
+    """PrestaShop rechaza <>;=#{} en nombres de producto y fabricante."""
+    if txt is None:
+        return None
+    t = _re.sub(r"\s+", " ", _re.sub(r"[<>;=#{}]", " ", str(txt))).strip()
+    return t[:maximo] if t else t
+
+
 class PrestashopClient:
     def __init__(self):
         c = config.leer_config()
@@ -42,7 +57,7 @@ class PrestashopClient:
         return f"{self.url}/index.php?fc=module&module={MODULO}&controller={controller}"
 
     def actualizar_producto(self, id_product=None, ean=None, cambios: dict | None = None,
-                            timeout: int = 40) -> dict:
+                            timeout=(5, 30)) -> dict:
         """Actualiza EAN13 y/o nombre de un producto existente (por id o por ean)."""
         payload = {"token": self.token, "producto": cambios or {}}
         if id_product:
@@ -56,7 +71,7 @@ class PrestashopClient:
         return self._parse(r)
 
     def crear_producto(self, datos: dict, id_proveedor=None, id_impuestos=None,
-                       timeout: int = 40) -> dict:
+                       timeout=(5, 100)) -> dict:
         """Envía la ficha del scraper al módulo para crear el producto.
 
         id_proveedor: si se indica, sobrescribe el proveedor por defecto de la
@@ -68,13 +83,23 @@ class PrestashopClient:
         precio de venta se puede fijar a mano con 'precio_venta_sin_iva'."""
         prov = id_proveedor if id_proveedor is not None else self.id_proveedor
         imp = id_impuestos if id_impuestos not in (None, "") else self.id_impuestos
+        if not str(imp).isdigit() or int(imp) <= 0:
+            # Sin regla (p. ej. tras un reinicio en Render, o desde lote/escáner):
+            # la del 21 %. Antes iba a 0 y el PVP se guardaba con el IVA dentro.
+            tasa = 21
+            if datos.get("iva_pct") is not None and not datos.get("iva_estimado"):
+                try:
+                    tasa = float(datos["iva_pct"])
+                except (TypeError, ValueError):
+                    tasa = 21
+            imp = self.id_impuestos_por_tasa(tasa) or self.id_impuestos_por_tasa(21) or imp
         payload = {
             "token": self.token,
             "id_categoria": self.categoria_defecto,
             "id_proveedor": int(prov) if str(prov).isdigit() else 0,
             "id_impuestos": int(imp) if str(imp).isdigit() else 0,
             "producto": {
-                "nombre": datos.get("nombre"),
+                "nombre": _limpiar_nombre(datos.get("nombre"), 128),
                 "ean13": datos.get("ean"),
                 "precio_sin_iva": datos.get("precio_unidad_sin_iva") or datos.get("precio_sin_iva"),
                 "precio_venta_con_iva": datos.get("precio_venta_con_iva"),  # PVP a mano (con IVA)
@@ -82,7 +107,7 @@ class PrestashopClient:
                 "pvp": datos.get("pvp_recomendado"),
                 "iva_pct": datos.get("iva_pct"),
                 "unidades_venta": datos.get("unidades_venta"),
-                "fabricante": datos.get("fabricante"),
+                "fabricante": _limpiar_nombre(datos.get("fabricante"), 64),
                 "descripcion": datos.get("descripcion"),
                 "situacion": datos.get("situacion"),
                 "dropshipping": datos.get("dropshipping", True),
@@ -99,7 +124,7 @@ class PrestashopClient:
             raise PrestashopError(f"No se pudo conectar con PrestaShop: {e}")
         return self._parse(r)
 
-    def obtener_ficha(self, ean, timeout: int = 40) -> dict:
+    def obtener_ficha(self, ean, timeout=(5, 12)) -> dict:
         """Ficha resumida de un producto por EAN (nombre, precio, imagen, activo)."""
         try:
             r = requests.post(self._endpoint("ficha"),
@@ -108,14 +133,19 @@ class PrestashopClient:
             raise PrestashopError(f"No se pudo conectar con PrestaShop: {e}")
         return self._parse(r)
 
-    def listar_productos(self, timeout: int = 40) -> list[dict]:
+    def listar_productos(self, timeout: int = 90, precio: bool = True,
+                         solo_con_ean: bool = True) -> list[dict]:
+        """Productos de la tienda. precio=False evita calcular el PVP de cada
+        producto (mucho más rápido con miles de productos)."""
         try:
-            r = requests.post(self._endpoint("listado"), json={"token": self.token}, timeout=timeout)
+            r = requests.post(self._endpoint("listado"),
+                              json={"token": self.token, "precio": precio,
+                                    "solo_con_ean": solo_con_ean}, timeout=timeout)
         except requests.RequestException as e:
             raise PrestashopError(f"No se pudo conectar con PrestaShop: {e}")
         return self._parse(r).get("productos", [])
 
-    def comprobar_eans(self, eans: list, timeout: int = 40) -> dict:
+    def comprobar_eans(self, eans: list, timeout=(5, 15)) -> dict:
         """Devuelve {ean: {id, activo, nombre, precio}} de los EANs que YA existen
         en la tienda. 'precio' es el PVP con IVA incluido (módulo >= 1.3.0)."""
         eans = [str(e) for e in eans if e]
@@ -128,7 +158,28 @@ class PrestashopClient:
             raise PrestashopError(f"No se pudo conectar con PrestaShop: {e}")
         return self._parse(r).get("existentes", {})
 
-    def obtener_opciones(self, timeout: int = 40) -> dict:
+    def id_impuestos_por_tasa(self, tasa: float = 21) -> int | None:
+        """id de la regla de impuestos del tipo indicado (por defecto 21 %).
+        Usa el 'tasa' que da el módulo (>= 1.6.0) o, si no, el nombre
+        ("... (21%)"). Cachea las opciones 1 hora."""
+        ahora = _time.time()
+        if _CACHE_OPC["datos"] is None or ahora - _CACHE_OPC["t"] > 3600:
+            try:
+                _CACHE_OPC["datos"] = self.obtener_opciones()
+                _CACHE_OPC["t"] = ahora
+            except Exception:  # noqa: BLE001
+                return None
+        imps = (_CACHE_OPC["datos"] or {}).get("impuestos") or []
+        for t in imps:
+            if t.get("tasa") is not None and abs(float(t["tasa"]) - float(tasa)) < 0.01:
+                return int(t["id"])
+        if int(tasa) == 21:
+            for t in imps:
+                if _RE_21.search(str(t.get("nombre") or "")):
+                    return int(t["id"])
+        return None
+
+    def obtener_opciones(self, timeout=(5, 15)) -> dict:
         """Devuelve {'proveedores': [...], 'impuestos': [...]} desde el módulo."""
         try:
             r = requests.post(self._endpoint("opciones"), json={"token": self.token}, timeout=timeout)

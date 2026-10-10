@@ -43,7 +43,7 @@ class AplproveedoresconectorListadoModuleFrontController extends ModuleFrontCont
         $soloConEan = !isset($in['solo_con_ean']) || $in['solo_con_ean'];
         $tablaExp = $this->module->tablaExpositor();
 
-        $sql = 'SELECT p.id_product, p.ean13, p.active, pl.name, m.name AS fabricante'
+        $sql = 'SELECT p.id_product, p.ean13, p.active, p.id_supplier, pl.name, m.name AS fabricante'
              . ($tablaExp ? ', ex.ean_expositor' : '') . '
                 FROM ' . _DB_PREFIX_ . 'product p
                 JOIN ' . _DB_PREFIX_ . 'product_lang pl
@@ -73,6 +73,7 @@ class AplproveedoresconectorListadoModuleFrontController extends ModuleFrontCont
                 'nombre' => $r['name'],
                 'fabricante' => $r['fabricante'] !== null ? $r['fabricante'] : '',
                 'activo' => (int) $r['active'] === 1,
+                'id_supplier' => (int) $r['id_supplier'],
             ];
             if ($incluirPrecio) {
                 $idp = (int) $r['id_product'];

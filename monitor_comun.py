@@ -27,6 +27,7 @@ from concurrent.futures import ThreadPoolExecutor
 import requests
 
 import busqueda_comun as bc
+from supabase_paginado import get_todos
 
 SUPABASE_URL = os.environ.get("SUPABASE_URL", "").rstrip("/")
 SUPABASE_KEY = os.environ.get("SUPABASE_KEY", "").strip()
@@ -87,28 +88,37 @@ def ean_consulta(v: dict) -> str:
     return exp or str(v.get("ean") or "").strip()
 
 
+ESTADOS_INCIDENCIA = ("agotado", "desaparecido")
+
+
+def _filtro_estado(params: dict, estado: str) -> None:
+    """Filtro de estado para PostgREST. Además de los estados normales admite
+    'incidencias' (agotado + desaparecido) y 'sin_comprobar' (nunca revisado)."""
+    if estado == "incidencias":
+        params["estado"] = "in.(%s)" % ",".join(ESTADOS_INCIDENCIA)
+    elif estado == "sin_comprobar":
+        params["ultima_revision"] = "is.null"
+    else:
+        params["estado"] = f"eq.{estado}"
+
+
 # --------------------------------------------------------------------------- #
 # Lectura
 # --------------------------------------------------------------------------- #
 def listar(proveedor: str | None = None, estado: str | None = None,
-           solo_activos: bool = False, limite: int = 2000) -> list[dict]:
+           solo_activos: bool = False, limite: int | None = None,
+           orden: str = "nombre.asc.nullslast,id.asc") -> list[dict]:
+    """TODAS las filas que cumplen los filtros (paginando de 1000 en 1000)."""
     if not activo():
         return []
-    params = {"select": "*", "order": "nombre.asc.nullslast", "limit": str(limite)}
+    params = {"select": "*", "order": orden}
     if proveedor:
         params["proveedor"] = f"eq.{normalizar_proveedor(proveedor)}"
     if estado:
-        params["estado"] = f"eq.{estado}"
+        _filtro_estado(params, estado)
     if solo_activos:
         params["activo"] = "eq.true"
-    try:
-        r = requests.get(_url(TABLA), params=params, headers=_headers(), timeout=_TIMEOUT)
-        if r.status_code < 300:
-            return r.json()
-        print(f"[monitor] Supabase listar {r.status_code}: {r.text[:200]}")
-    except Exception as e:  # noqa: BLE001
-        print(f"[monitor] no se pudo listar: {e}")
-    return []
+    return get_todos(_url(TABLA), params, _headers(), maximo=limite) or []
 
 
 def _contar(filtros: dict) -> int:
@@ -132,13 +142,22 @@ def _contar(filtros: dict) -> int:
 def resumen() -> dict:
     """Conteos por proveedor e incidencias, eficiente (sin traer todas las filas)."""
     base = {"activo": "eq.true"}
+    filtros = {
+        "total": base,
+        "AZETA": {**base, "proveedor": "eq.AZETA"},
+        "Liderpapel": {**base, "proveedor": "eq.Liderpapel"},
+        "incidencias": {**base, "estado": "in.(agotado,desaparecido)"},
+        "sin_comprobar": {**base, "ultima_revision": "is.null"},
+    }
+    # En paralelo: antes eran 4 peticiones seguidas en cada carga de la página.
+    claves = list(filtros)
+    valores = list(_pool_lectura.map(lambda k: _contar(filtros[k]), claves))
+    n = dict(zip(claves, valores))
     return {
-        "total": _contar(base),
-        "por_proveedor": {
-            "AZETA": _contar({**base, "proveedor": "eq.AZETA"}),
-            "Liderpapel": _contar({**base, "proveedor": "eq.Liderpapel"}),
-        },
-        "incidencias": _contar({**base, "estado": "in.(agotado,desaparecido)"}),
+        "total": n["total"],
+        "por_proveedor": {"AZETA": n["AZETA"], "Liderpapel": n["Liderpapel"]},
+        "incidencias": n["incidencias"],
+        "sin_comprobar": n["sin_comprobar"],
     }
 
 
@@ -155,10 +174,13 @@ def listar_pagina(proveedor: str | None = None, estado: str | None = None,
     if proveedor:
         params["proveedor"] = f"eq.{normalizar_proveedor(proveedor)}"
     if estado:
-        params["estado"] = f"eq.{estado}"
+        _filtro_estado(params, estado)
     if buscar:
-        t = buscar.replace(",", " ").strip()
-        params["or"] = f"(ean.ilike.*{t}*,ean_expositor.ilike.*{t}*,nombre.ilike.*{t}*)"
+        # Entre comillas dobles para que paréntesis, comas o puntos del texto
+        # no rompan la sintaxis de PostgREST (antes "Pilot (azul)" daba 400).
+        t = buscar.strip().replace("\\", "\\\\").replace('"', '\\"')
+        params["or"] = (f'(ean.ilike."*{t}*",ean_expositor.ilike."*{t}*",'
+                        f'nombre.ilike."*{t}*")')
     try:
         r = requests.get(_url(TABLA), params=params,
                         headers=_headers({"Prefer": "count=exact", "Range-Unit": "items",
@@ -216,7 +238,8 @@ def añadir(ean: str, proveedor: str, nombre: str | None = None,
            origen: str = "manual", id_prestashop=None,
            estado: str | None = None, stock=None,
            precio_neto=None, coste_real=None,
-           ean_expositor: str | None = None) -> bool:
+           ean_expositor: str | None = None,
+           ultima_revision: str | None = None) -> bool:
     """Alta (o actualización) de un vigilado. Upsert por (ean, proveedor).
 
     'ean' es el de PrestaShop; 'ean_expositor' (opcional) el del proveedor."""
@@ -238,6 +261,8 @@ def añadir(ean: str, proveedor: str, nombre: str | None = None,
         fila["precio_neto"] = precio_neto
     if coste_real is not None:
         fila["coste_real"] = coste_real
+    if ultima_revision is not None:
+        fila["ultima_revision"] = ultima_revision
     try:
         r = requests.post(
             _url(TABLA),
@@ -252,6 +277,78 @@ def añadir(ean: str, proveedor: str, nombre: str | None = None,
     except Exception as e:  # noqa: BLE001
         print(f"[monitor] no se pudo añadir: {e}")
     return False
+
+
+def vigilar_con_ficha(ean: str, proveedor: str, ficha: dict, origen: str = "manual",
+                      id_prestashop=None, ean_expositor: str | None = None) -> bool:
+    """Alta (o actualización) de un vigilado YA rellena con lo que dice el
+    proveedor (nombre, estado, stock, precio neto, coste real), sin esperar a la
+    próxima comprobación. 'ficha' es un dict normalizado (bc.norm_azeta /
+    bc.norm_cs). Deja también una entrada en el histórico."""
+    from datetime import datetime, timezone
+    if not activo() or not ean or not ficha:
+        return False
+    prov = normalizar_proveedor(proveedor)
+    estado = _estado_desde_ficha(ficha)
+    ok = añadir(ean, prov, nombre=ficha.get("nombre"), origen=origen,
+                id_prestashop=id_prestashop, estado=estado,
+                stock=ficha.get("stock"), precio_neto=ficha.get("precio_neto"),
+                coste_real=ficha.get("coste_real"), ean_expositor=ean_expositor,
+                ultima_revision=datetime.now(timezone.utc).isoformat())
+    if ok:
+        _insertar_historico({"ean": str(ean), "proveedor": prov, "estado": estado,
+                             "stock": ficha.get("stock"),
+                             "precio_neto": ficha.get("precio_neto"),
+                             "coste_real": ficha.get("coste_real"),
+                             "nombre": ficha.get("nombre")})
+    return ok
+
+
+def vincular_expositor(id_prestashop, ean13: str | None, ean_expositor: str | None) -> bool:
+    """Replica en el monitor el EAN de expositor de un producto de PrestaShop.
+
+    1) Filas del producto (por id_prestashop o por su EAN de tienda): se les
+       pone el EAN de expositor (o se les quita, si llega vacío).
+    2) Filas que se dieron de alta con el EAN del proveedor (antes de vincular):
+       pasan a la clave del EAN de tienda; si ya había fila con esa clave, la
+       duplicada se borra."""
+    if not activo():
+        return False
+    exp = (ean_expositor or "").strip() or None
+    ean13 = (str(ean13 or "")).strip() or None
+    conds = []
+    if id_prestashop:
+        conds.append(f"id_prestashop.eq.{int(id_prestashop)}")
+    if ean13:
+        conds.append(f"ean.eq.{ean13}")
+    if not conds:
+        return False
+    cambios = {"ean_expositor": exp}
+    if id_prestashop:
+        cambios["id_prestashop"] = int(id_prestashop)
+    ok = True
+    try:
+        r = requests.patch(_url(TABLA), params={"or": f"({','.join(conds)})"}, json=cambios,
+                           headers=_headers({"Prefer": "return=minimal"}), timeout=_TIMEOUT)
+        ok = r.status_code < 300
+    except Exception as e:  # noqa: BLE001
+        print(f"[monitor] no se pudo fijar el EAN de expositor: {e}")
+        ok = False
+
+    if exp and ean13 and exp != ean13:
+        try:
+            r = requests.get(_url(TABLA), params={"select": "ean,proveedor", "ean": f"eq.{exp}"},
+                             headers=_headers(), timeout=_TIMEOUT)
+            viejas = r.json() if r.status_code < 300 else []
+        except Exception:  # noqa: BLE001
+            viejas = []
+        for f in viejas:
+            prov = f.get("proveedor")
+            if obtener(ean13, prov):
+                quitar(exp, prov)
+            else:
+                _patch(exp, prov, {"ean": ean13, **cambios})
+    return ok
 
 
 def quitar(ean: str, proveedor: str) -> bool:
@@ -286,8 +383,21 @@ def _insertar_historico(fila: dict) -> None:
         print(f"[monitor] no se pudo registrar histórico: {e}")
 
 
+def _distinto(a, b) -> bool:
+    if a is None or b is None:
+        return (a is None) != (b is None)
+    try:
+        return abs(float(a) - float(b)) > 0.0001
+    except (TypeError, ValueError):
+        return str(a) != str(b)
+
+
 def actualizar_estado(ean: str, proveedor: str, estado: str, nombre=None,
-                      stock=None, precio_neto=None, coste_real=None) -> None:
+                      stock=None, precio_neto=None, coste_real=None,
+                      previo: dict | None = None) -> None:
+    """Guarda el estado de una comprobación. En el histórico solo se apunta si
+    algo ha cambiado respecto a 'previo' (antes: una fila por comprobación,
+    ~8000 por cada "Comprobar todos")."""
     from datetime import datetime, timezone
     prov = normalizar_proveedor(proveedor)
     cambios = {"estado": estado, "ultima_revision": datetime.now(timezone.utc).isoformat()}
@@ -300,15 +410,20 @@ def actualizar_estado(ean: str, proveedor: str, estado: str, nombre=None,
     if coste_real is not None:
         cambios["coste_real"] = coste_real
     _patch(ean, prov, cambios)
-    _insertar_historico({"ean": str(ean), "proveedor": prov, "estado": estado,
-                         "stock": stock, "precio_neto": precio_neto,
-                         "coste_real": coste_real, "nombre": nombre})
+    cambia = previo is None or previo.get("estado") != estado or any(
+        _distinto(previo.get(k), v) for k, v in
+        (("stock", stock), ("precio_neto", precio_neto), ("coste_real", coste_real)))
+    if cambia:
+        _insertar_historico({"ean": str(ean), "proveedor": prov, "estado": estado,
+                             "stock": stock, "precio_neto": precio_neto,
+                             "coste_real": coste_real, "nombre": nombre})
 
 
 # --------------------------------------------------------------------------- #
 # Comprobación de estado (reutiliza busqueda_comun)
 # --------------------------------------------------------------------------- #
 _pool = ThreadPoolExecutor(max_workers=6)
+_pool_lectura = ThreadPoolExecutor(max_workers=5)
 
 
 def _comprobar_uno(v: dict) -> dict:
@@ -325,6 +440,11 @@ def _comprobar_uno(v: dict) -> dict:
         return {"ean": ean, "proveedor": prov, "error": str(e)}
 
     if norm.get("error") and not norm.get("encontrado"):
+        # No se toca el estado (no sabemos si está), pero sí la fecha de
+        # revisión: si no, en las comprobaciones por tandas (cron) las filas
+        # que fallan siempre encabezarían la cola y no avanzaría.
+        from datetime import datetime, timezone
+        _patch(ean, prov, {"ultima_revision": datetime.now(timezone.utc).isoformat()})
         return {"ean": ean, "proveedor": prov, "error": norm.get("error")}
 
     estado = _estado_desde_ficha(norm)
@@ -332,7 +452,8 @@ def _comprobar_uno(v: dict) -> dict:
     actualizar_estado(ean, prov, estado, nombre=nombre,
                       stock=norm.get("stock"),
                       precio_neto=norm.get("precio_neto"),
-                      coste_real=norm.get("coste_real"))
+                      coste_real=norm.get("coste_real"),
+                      previo=v if v.get("ultima_revision") else None)
     incidencia = None
     if estado != "disponible" and estado_previo != estado:
         incidencia = {"ean": ean, "proveedor": prov, "estado": estado, "nombre": nombre}
@@ -372,8 +493,114 @@ def cambiar_proveedor(ean: str, proveedor_viejo: str, proveedor_nuevo: str) -> b
     return True
 
 
+# --------------------------------------------------------------------------- #
+# Comprobación masiva EN SEGUNDO PLANO (una sola a la vez, con progreso)
+# --------------------------------------------------------------------------- #
+# Antes "Comprobar todos" se hacía dentro de la petición: con miles de filas
+# tardaba horas, el navegador daba error y nunca se veía el resultado.
+import threading as _threading
+from datetime import datetime as _dt, timezone as _tz
+
+_JOB_LOCK = _threading.Lock()
+_JOB: dict = {"estado": "parado"}
+_MAX_INCIDENCIAS = 300
+
+
+def estado_comprobacion() -> dict:
+    """Copia del estado del trabajo (para la barra de progreso)."""
+    with _JOB_LOCK:
+        j = dict(_JOB)
+        j["incidencias"] = list(_JOB.get("incidencias") or [])
+        j["errores"] = list(_JOB.get("errores") or [])
+    return j
+
+
+def iniciar_comprobacion(proveedor: str | None = None, estado: str | None = None,
+                         maximo: int | None = None, origen: str = "manual") -> dict:
+    """Lanza la comprobación en segundo plano. Primero las filas revisadas hace
+    más tiempo (o nunca), así una ejecución cortada se puede retomar.
+    maximo: solo las N más antiguas (útil para un cron que va por tandas)."""
+    with _JOB_LOCK:
+        if _JOB.get("estado") in ("en_curso", "preparando"):
+            return {"ok": False, "error": "Ya hay una comprobación en marcha.", "ya_en_curso": True}
+        _JOB.clear()
+        _JOB.update({"estado": "preparando", "origen": origen, "proveedor": proveedor,
+                     "filtro_estado": estado, "total": 0, "hechos": 0, "disponibles": 0,
+                     "n_incidencias": 0, "n_errores": 0, "incidencias": [], "errores": [],
+                     "inicio": _dt.now(_tz.utc).isoformat(), "fin": None, "cancelar": False})
+    try:
+        filas = listar(proveedor=proveedor, estado=estado, solo_activos=True, limite=maximo,
+                       orden="ultima_revision.asc.nullsfirst,id.asc")
+    except Exception as e:  # noqa: BLE001
+        filas = []
+        print(f"[monitor] no se pudo preparar la comprobación: {e}")
+    with _JOB_LOCK:
+        _JOB.update({"estado": "en_curso", "total": len(filas)})
+    _threading.Thread(target=_trabajo_comprobacion, args=(filas,), daemon=True,
+                      name="monitor-comprobar").start()
+    return {"ok": True, "total": len(filas)}
+
+
+def cancelar_comprobacion() -> bool:
+    with _JOB_LOCK:
+        if _JOB.get("estado") not in ("en_curso", "preparando"):
+            return False
+        _JOB["cancelar"] = True
+    return True
+
+
+def _trabajo_comprobacion(filas: list[dict]) -> None:
+    from concurrent.futures import as_completed
+    try:
+        # 3 hilos: AZETA y Liderpapel van en paralelo entre sí (cada proveedor
+        # usa una sola sesión, así que dentro de cada uno van de una en una).
+        with ThreadPoolExecutor(max_workers=3) as ex:
+            pendientes = set()
+            it = iter(filas)
+            for v in it:
+                pendientes.add(ex.submit(_comprobar_uno, v))
+                if len(pendientes) >= 6:
+                    break
+            while pendientes:
+                hecho = next(as_completed(pendientes))
+                pendientes.discard(hecho)
+                try:
+                    r = hecho.result()
+                except Exception as e:  # noqa: BLE001
+                    r = {"ean": "?", "proveedor": "?", "error": str(e)}
+                with _JOB_LOCK:
+                    _JOB["hechos"] += 1
+                    if r.get("error"):
+                        _JOB["n_errores"] += 1
+                        if len(_JOB["errores"]) < 50:
+                            _JOB["errores"].append({"ean": r.get("ean"), "proveedor": r.get("proveedor"),
+                                                    "error": str(r.get("error"))[:200]})
+                    elif r.get("estado") == "disponible":
+                        _JOB["disponibles"] += 1
+                    if r.get("incidencia"):
+                        _JOB["n_incidencias"] += 1
+                        if len(_JOB["incidencias"]) < _MAX_INCIDENCIAS:
+                            _JOB["incidencias"].append(r["incidencia"])
+                    cancelar = _JOB.get("cancelar")
+                if not cancelar:
+                    siguiente = next(it, None)
+                    if siguiente is not None:
+                        pendientes.add(ex.submit(_comprobar_uno, siguiente))
+        with _JOB_LOCK:
+            _JOB["estado"] = "cancelado" if _JOB.get("cancelar") else "terminado"
+    except Exception as e:  # noqa: BLE001
+        with _JOB_LOCK:
+            _JOB["estado"] = "error"
+            _JOB["error"] = str(e)
+    finally:
+        with _JOB_LOCK:
+            _JOB["fin"] = _dt.now(_tz.utc).isoformat()
+            if _JOB.get("estado") in ("en_curso", "preparando"):
+                _JOB["estado"] = "terminado"
+
+
 def comprobar_todos(proveedor: str | None = None) -> dict:
-    """Recomprueba todos los vigilados activos (o solo los de un proveedor)."""
+    """(Síncrono, para scripts) Recomprueba todos los vigilados activos."""
     vigilados = listar(proveedor=proveedor, solo_activos=True)
     if not vigilados:
         return {"comprobados": 0, "disponibles": 0, "incidencias": [], "errores": []}
@@ -444,50 +671,137 @@ def _filas_con_ps() -> list[dict]:
     if not activo():
         return []
     params = {"select": "ean,ean_expositor,proveedor,nombre,id_prestashop",
-              "id_prestashop": "not.is.null", "limit": "10000"}
+              "id_prestashop": "not.is.null", "order": "id.asc"}
+    return get_todos(_url(TABLA), params, _headers()) or []
+
+
+def _insertar_lote(filas: list[dict]) -> int:
+    """Alta masiva (bloques de 500). Ignora las que ya existan (ean, proveedor)."""
+    n = 0
+    for i in range(0, len(filas), 500):
+        trozo = filas[i:i + 500]
+        try:
+            r = requests.post(_url(TABLA), params={"on_conflict": "ean,proveedor"}, json=trozo,
+                              headers=_headers({"Prefer": "resolution=ignore-duplicates,return=minimal"}),
+                              timeout=30)
+            if r.status_code < 300:
+                n += len(trozo)
+            else:
+                print(f"[monitor] alta masiva {r.status_code}: {r.text[:200]}")
+        except Exception as e:  # noqa: BLE001
+            print(f"[monitor] alta masiva fallida: {e}")
+    return n
+
+
+def _int_o_none(v):
     try:
-        r = requests.get(_url(TABLA), params=params, headers=_headers(), timeout=_TIMEOUT)
-        return r.json() if r.status_code < 300 else []
-    except Exception:  # noqa: BLE001
-        return []
+        return int(v)
+    except (TypeError, ValueError):
+        return None
 
 
 def sincronizar_desde_prestashop() -> dict:
-    """Bidireccional (PS -> monitor): trae los productos de PrestaShop; a los ya
-    enlazados por id les actualiza EAN / EAN de expositor / nombre, y añade los
-    que no estén vigilados. Devuelve {añadidos, actualizados}."""
+    """PrestaShop -> monitor, sin duplicar.
+
+    - Productos ya vigilados (enlazados por id_prestashop, o por EAN / EAN de
+      expositor si aún no estaban enlazados): se actualizan EAN, EAN de
+      expositor, nombre y el enlace, en TODAS sus filas (AZETA y Liderpapel).
+    - Productos nuevos: se dan de alta UNA vez, con el proveedor que tienen en
+      PrestaShop (si el módulo lo devuelve; si no, AZETA).
+    - Filas enlazadas a productos que ya no existen en PrestaShop: se
+      desactivan (dejan de comprobarse), no se borran.
+    Devuelve {añadidos, actualizados, desactivados}."""
+    import config
     from prestashop_client import PrestashopClient
-    productos = PrestashopClient().listar_productos()
-    por_id = {}
-    for f in _filas_con_ps():
+    productos = PrestashopClient().listar_productos(precio=False, solo_con_ean=False)
+    filas = get_todos(_url(TABLA), {"select": "*", "order": "id.asc"}, _headers())
+    if filas is None:
+        # Sin la lista completa trataríamos todo como nuevo y se duplicaría.
+        raise RuntimeError("No se pudo leer el monitor completo de Supabase; inténtalo de nuevo.")
+    cfg = config.leer_config()
+    prov_cs = str(cfg.get("PRESTASHOP_PROVEEDOR_CS") or "").strip()
+
+    por_id: dict[int, list[dict]] = {}
+    por_ean: dict[str, list[dict]] = {}
+    for f in filas:
         try:
-            por_id[int(f["id_prestashop"])] = f
+            if f.get("id_prestashop") is not None:
+                por_id.setdefault(int(f["id_prestashop"]), []).append(f)
+        except (TypeError, ValueError):
+            pass
+        for e in (f.get("ean"), f.get("ean_expositor")):
+            if e:
+                por_ean.setdefault(str(e).strip(), []).append(f)
+
+    añadidos = actualizados = desactivados = 0
+    ids_ps: set[int] = set()
+    for p in productos:
+        try:
+            ids_ps.add(int(p.get("id") or p.get("id_product")))
+        except (TypeError, ValueError):
+            pass
+    nuevas: list[dict] = []
+    vistos_nuevos: set[str] = set()
+    reenlazadas: set = set()
+    for p in productos:
+        try:
+            pid = int(p.get("id") or p.get("id_product"))
         except (TypeError, ValueError):
             continue
-    añadidos = actualizados = 0
-    for p in productos:
-        pid = p.get("id") or p.get("id_product")
-        ean = p.get("ean13") or p.get("ean")
-        # Solo si el módulo de PrestaShop ya devuelve el campo: así una versión
-        # antigua del módulo no borra los EAN de expositor puestos a mano.
+        ean = str(p.get("ean13") or p.get("ean") or "").strip()
+        # Solo si el módulo ya devuelve el campo: así una versión antigua del
+        # módulo no borra los EAN de expositor puestos a mano.
         trae_exp = "ean_expositor" in p
         exp = (p.get("ean_expositor") or "").strip()
         nombre = p.get("nombre")
-        row = por_id.get(int(pid)) if pid is not None else None
-        if row:
-            cambios = {}
-            if ean and str(row.get("ean")) != str(ean):
-                cambios["ean"] = str(ean)
-            if nombre and (row.get("nombre") or "") != nombre:
-                cambios["nombre"] = nombre
-            # El EAN de expositor manda desde PrestaShop (incluido quitarlo).
-            if trae_exp and exp != (row.get("ean_expositor") or "").strip():
-                cambios["ean_expositor"] = exp or None
-            if cambios:
-                _patch(row["ean"], row["proveedor"], cambios)
-                actualizados += 1
-        elif ean:
-            if añadir(ean, "AZETA", nombre=nombre, origen="prestashop",
-                      id_prestashop=pid, ean_expositor=(exp or None) if trae_exp else None):
-                añadidos += 1
-    return {"añadidos": añadidos, "actualizados": actualizados}
+
+        rows = por_id.get(pid) or []
+        if not rows:   # vigilado pero sin enlazar: localizar por EAN / expositor
+            cand = (por_ean.get(ean, []) if ean else []) + (por_ean.get(exp, []) if exp else [])
+            # Sin enlazar, o enlazadas a un id que ya no existe (producto borrado
+            # y vuelto a crear con el mismo EAN): se re-enlazan a este.
+            rows = [r for r in {id(r): r for r in cand}.values()
+                    if r.get("id_prestashop") in (None, "", pid)
+                    or _int_o_none(r.get("id_prestashop")) not in ids_ps]
+        if rows:
+            for row in rows:
+                cambios = {}
+                if ean and str(row.get("ean")) != ean:
+                    cambios["ean"] = ean
+                if nombre and (row.get("nombre") or "") != nombre:
+                    cambios["nombre"] = nombre
+                # El EAN de expositor manda desde PrestaShop (incluido quitarlo).
+                if trae_exp and exp != (row.get("ean_expositor") or "").strip():
+                    cambios["ean_expositor"] = exp or None
+                if _int_o_none(row.get("id_prestashop")) != pid:
+                    cambios["id_prestashop"] = pid
+                    reenlazadas.add((row.get("ean"), row.get("proveedor")))
+                if row.get("activo") is False:
+                    cambios["activo"] = True       # vuelve a existir en la tienda
+                if cambios and _patch(row["ean"], row["proveedor"], cambios):
+                    actualizados += 1
+        elif ean and ean not in vistos_nuevos:
+            vistos_nuevos.add(ean)
+            prov = "AZETA"
+            if prov_cs and str(p.get("id_supplier") or "") == prov_cs:
+                prov = "Liderpapel"
+            # Todas las filas con las MISMAS claves (PostgREST lo exige en altas masivas).
+            nuevas.append({"ean": ean, "proveedor": prov, "nombre": nombre,
+                           "origen": "prestashop", "id_prestashop": pid, "activo": True,
+                           "ean_expositor": (exp or None) if trae_exp else None})
+
+    if nuevas:
+        añadidos = _insertar_lote(nuevas)
+
+    # Productos borrados en PrestaShop -> desactivar sus filas (si el listado
+    # vino completo; con un listado vacío no se toca nada por seguridad).
+    if ids_ps:
+        for pid, rows in por_id.items():
+            if pid in ids_ps:
+                continue
+            for row in rows:
+                if (row.get("ean"), row.get("proveedor")) in reenlazadas:
+                    continue          # ya enlazada a un producto que sí existe
+                if row.get("activo") is not False and _patch(row["ean"], row["proveedor"], {"activo": False}):
+                    desactivados += 1
+    return {"añadidos": añadidos, "actualizados": actualizados, "desactivados": desactivados}

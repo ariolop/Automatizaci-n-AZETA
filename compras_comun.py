@@ -144,17 +144,14 @@ def anadir_compras(filas: list[dict]) -> bool:
 # --------------------------------------------------------------------------- #
 # Lecturas
 # --------------------------------------------------------------------------- #
-def listar(limite: int = 5000) -> list[dict]:
+def listar(limite: int | None = None) -> list[dict]:
+    """Todas las compras (paginando: Supabase corta en 1000 por petición)."""
     if not activo():
         return []
-    try:
-        r = requests.get(_url(),
-                         params={"select": "*", "order": "fecha_compra.desc.nullslast,ts.desc",
-                                 "limit": str(limite)},
-                         headers=_headers(), timeout=_TIMEOUT)
-        return r.json() if r.status_code < 300 else []
-    except Exception:  # noqa: BLE001
-        return []
+    from supabase_paginado import get_todos
+    return get_todos(_url(), {"select": "*",
+                              "order": "fecha_compra.desc.nullslast,ts.desc,id.desc"},
+                     _headers(), maximo=limite) or []
 
 
 def historico_de_clave(clave: str, limite: int = 500) -> list[dict]:

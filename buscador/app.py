@@ -42,16 +42,20 @@ def api_buscar():
     # Forzar Liderpapel: mostrar el resultado aunque el EAN no coincida.
     forzar_cs = _verdad(request.args.get("forzar_cs", "0"))
 
+    # La ficha de PrestaShop se pide EN PARALELO con los proveedores (antes iba
+    # después, en serie, y con PrestaShop lento la búsqueda se alargaba).
+    f_ps = bc._pool.submit(bc.ficha_prestashop, ean)
     res = bc.buscar(ean, con_azeta=con_azeta, con_cs=con_cs, forzar_cs=forzar_cs)
 
-    # ¿Ya existe en PrestaShop? (por cada EAN encontrado, sin duplicar consulta)
-    ya = {}
-    for lado in (res.get("azeta"), res.get("cs")):
-        if lado and lado.get("encontrado") and lado.get("ean") and lado["ean"] not in ya:
-            ya[lado["ean"]] = bc.ya_en_prestashop(lado["ean"])
+    # ¿Ya existe en PrestaShop? Todos los EAN encontrados en UNA sola consulta.
+    eans = [lado["ean"] for lado in (res.get("azeta"), res.get("cs"))
+            if lado and lado.get("encontrado") and lado.get("ean")]
     res["ok"] = True
-    res["ya_prestashop"] = ya
-    res["ps"] = bc.ficha_prestashop(ean)   # cómo está en PrestaShop (nombre/precio/imagen)
+    res["ya_prestashop"] = bc.ya_en_prestashop_varios(eans)
+    try:
+        res["ps"] = f_ps.result(timeout=20)   # cómo está en PrestaShop (nombre/precio/imagen)
+    except Exception:  # noqa: BLE001
+        res["ps"] = None
     res["ps_ok"] = bc.prestashop_configurado()
     return jsonify(res)
 
@@ -98,7 +102,22 @@ def actualizar():
         return jsonify({"ok": False, "error": "Falta 'ean'."}), 400
     res = bc.actualizar_prestashop(ean=ean, precio=data.get("precio"),
                                    stock=data.get("stock"), ean13=data.get("ean13"),
-                                   id_impuestos=data.get("id_impuestos"), activo=data.get("activo"))
+                                   id_impuestos=data.get("id_impuestos"), activo=data.get("activo"),
+                                   ean_expositor=data.get("ean_expositor"))
+    return jsonify(res), (200 if res.get("ok") else 400)
+
+
+@app.route("/expositor", methods=["POST"])
+def expositor():
+    """Vincula el EAN del proveedor como EAN de expositor de un producto que ya
+    está en PrestaShop con otro EAN (localizado por 'ean_tienda' o 'id_product').
+    Si llega 'proveedor', además lo deja vigilado en el monitor con sus datos."""
+    data = request.get_json(silent=True) or {}
+    res = bc.asignar_expositor(data.get("ean_expositor"), ean_tienda=data.get("ean_tienda"),
+                               id_product=data.get("id_product"))
+    if res.get("ok") and data.get("proveedor") and res.get("ean_expositor") and mon.activo():
+        v = bc.vigilar(data["proveedor"], res["ean_expositor"])
+        res["vigilado"] = bool(v.get("ok"))
     return jsonify(res), (200 if res.get("ok") else 400)
 
 
@@ -110,7 +129,8 @@ def opciones():
 
 @app.route("/monitor", methods=["POST"])
 def add_monitor():
-    """Añade el producto al monitor unificado (proveedor según la ficha)."""
+    """Añade el producto al monitor unificado (proveedor según la ficha),
+    consultando antes al proveedor para guardar ya coste, precio y stock."""
     data = request.get_json(silent=True) or {}
     proveedor = data.get("proveedor")
     ean = (data.get("ean") or "").strip()
@@ -119,5 +139,5 @@ def add_monitor():
         return jsonify({"ok": False, "error": "Faltan 'proveedor' y/o 'ean'."}), 400
     if not mon.activo():
         return jsonify({"ok": False, "error": "El monitor (Supabase) no está configurado."}), 400
-    ok = mon.añadir(ean, proveedor, nombre=nombre, origen="manual")
-    return (jsonify({"ok": True}), 200) if ok else (jsonify({"ok": False, "error": "No se pudo guardar."}), 400)
+    res = bc.vigilar(proveedor, ean, nombre=nombre)
+    return jsonify(res), (200 if res.get("ok") else 400)

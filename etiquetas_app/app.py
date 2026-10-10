@@ -66,7 +66,10 @@ def api_catalogo_lista():
     """Devuelve el catálogo guardado, para precargar la selección al abrir."""
     if not ec.activo():
         return jsonify({"ok": True, "persist": False, "productos": []})
-    return jsonify({"ok": True, "persist": True, "productos": ec.listar()})
+    productos = ec.listar()
+    if productos is None:   # fallo de lectura: no tocar la selección en pantalla
+        return jsonify({"ok": False, "persist": True, "error": "No se pudo leer la selección."})
+    return jsonify({"ok": True, "persist": True, "productos": productos})
 
 
 @app.route("/api/catalogo/guardar", methods=["POST"])
@@ -101,8 +104,30 @@ def api_catalogo_quitar():
 _EAN_RE = re.compile(r"^\d{12,13}$")
 
 
+def _digito_control(cuerpo: str) -> int:
+    """Dígito de control GTIN (EAN-13 / UPC-A) para los dígitos sin el último."""
+    total = sum(int(c) * (3 if i % 2 == 0 else 1) for i, c in enumerate(reversed(cuerpo)))
+    return (10 - total % 10) % 10
+
+
+def _ean13_valido(codigo: str) -> str | None:
+    """EAN-13 listo para imprimir, o None si el código NO es un EAN-13/UPC-A
+    con dígito de control correcto.
+
+    - 13 dígitos con control correcto -> tal cual.
+    - 12 dígitos con control correcto (UPC-A) -> se antepone un 0.
+    Antes se mandaba a reportlab cualquier código de 12-13 dígitos y éste
+    RECALCULA el control: la etiqueta mostraba otro código y no escaneaba."""
+    c = (codigo or "").strip()
+    if not _EAN_RE.match(c):
+        return None
+    if len(c) == 12:
+        c = "0" + c
+    return c if _digito_control(c[:-1]) == int(c[-1]) else None
+
+
 def _es_ean13(codigo: str) -> bool:
-    return bool(_EAN_RE.match((codigo or "").strip()))
+    return _ean13_valido(codigo) is not None
 
 
 def _envolver(texto: str, fuente: str, tam: float, ancho_max: float, max_lineas: int) -> list[str]:
@@ -152,10 +177,14 @@ def _barcode_drawing(codigo: str, ancho_max: float, alto: float):
     from reportlab.graphics.barcode import createBarcodeDrawing
 
     codigo = (codigo or "").strip()
-    if _es_ean13(codigo):
-        d = createBarcodeDrawing("EAN13", value=codigo, barHeight=alto,
+    ean13 = _ean13_valido(codigo)
+    if ean13:
+        # reportlab espera 12 dígitos y añade él el de control (que ya hemos
+        # comprobado que coincide).
+        d = createBarcodeDrawing("EAN13", value=ean13[:12], barHeight=alto,
                                  humanReadable=True, quiet=True)
     else:
+        # Código no válido como EAN: Code128 con el texto EXACTO (escanea igual).
         d = createBarcodeDrawing("Code128", value=codigo or "SIN-CODIGO", barHeight=alto,
                                  humanReadable=True, quiet=True)
     if d.width > ancho_max:

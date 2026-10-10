@@ -54,7 +54,8 @@ class AplproveedoresconectorCrearModuleFrontController extends ModuleFrontContro
         }
 
         $p = isset($in['producto']) && is_array($in['producto']) ? $in['producto'] : [];
-        $nombre = trim((string) ($p['nombre'] ?? ''));
+        // PrestaShop rechaza estos caracteres en el nombre (isCatalogName)
+        $nombre = trim(preg_replace('/\s+/u', ' ', preg_replace('/[<>;=#{}]/u', ' ', (string) ($p['nombre'] ?? ''))));
         $ean = preg_replace('/\D/', '', (string) ($p['ean13'] ?? ''));
 
         if ($nombre === '') {
@@ -82,25 +83,36 @@ class AplproveedoresconectorCrearModuleFrontController extends ModuleFrontContro
         }
         $idProveedor = (int) ($in['id_proveedor'] ?? 0);
         $idImpuestos = (int) ($in['id_impuestos'] ?? 0);
+        if ($idImpuestos <= 0) {
+            // Sin regla indicada: la del IVA del proveedor o, si no, la del 21 %.
+            $ivaPedido = isset($p['iva_pct']) && $p['iva_pct'] !== null && $p['iva_pct'] !== '' ? (float) $p['iva_pct'] : 21.0;
+            $idImpuestos = $this->grupoPorTasa($ivaPedido) ?: $this->grupoPorTasa(21.0);
+        }
 
         try {
             // Fabricante (crear si no existe)
             $idFabricante = 0;
-            $fab = trim((string) ($p['fabricante'] ?? ''));
+            $fab = trim(preg_replace('/[<>;=#{}]/u', ' ', (string) ($p['fabricante'] ?? '')));
+            $fab = mb_substr($fab, 0, 64);
             if ($fab !== '') {
-                $idFabricante = (int) Manufacturer::getIdByName($fab);
-                if (!$idFabricante) {
-                    $m = new Manufacturer();
-                    $m->name = $fab;
-                    $m->active = 1;
-                    $m->add();
-                    $idFabricante = (int) $m->id;
+                // Un fallo con el fabricante no debe impedir publicar el producto.
+                try {
+                    $idFabricante = (int) Manufacturer::getIdByName($fab);
+                    if (!$idFabricante) {
+                        $m = new Manufacturer();
+                        $m->name = $fab;
+                        $m->active = 1;
+                        $m->add();
+                        $idFabricante = (int) $m->id;
+                    }
+                } catch (Exception $e) {
+                    $idFabricante = 0;
                 }
             }
 
             $product = new Product();
             $product->name = [$idLang => $this->limpiar($nombre, 128)];
-            $product->link_rewrite = [$idLang => Tools::str2url($nombre) ?: ('producto-' . $ean)];
+            $product->link_rewrite = [$idLang => (mb_substr(Tools::str2url(mb_substr($nombre, 0, 120)), 0, 128) ?: ('producto-' . $ean))];
             $descripcion = trim((string) ($p['descripcion'] ?? ''));
             if ($descripcion !== '') {
                 $product->description = [$idLang => $descripcion];
@@ -350,6 +362,18 @@ class AplproveedoresconectorCrearModuleFrontController extends ModuleFrontContro
      * Tipo de IVA (%) de una regla de impuestos, usando el país por defecto de
      * la tienda. Devuelve 0.0 si no se puede determinar (sin impuestos).
      */
+    /** id de la regla de impuestos activa cuyo tipo (país por defecto) es $tasa; 0 si no hay. */
+    private function grupoPorTasa(float $tasa): int
+    {
+        foreach (TaxRulesGroup::getTaxRulesGroups(true) as $t) {
+            $id = (int) $t['id_tax_rules_group'];
+            if (abs($this->tasaImpuesto($id) - $tasa) < 0.01) {
+                return $id;
+            }
+        }
+        return 0;
+    }
+
     private function tasaImpuesto(int $idTaxRulesGroup): float
     {
         if ($idTaxRulesGroup <= 0) {

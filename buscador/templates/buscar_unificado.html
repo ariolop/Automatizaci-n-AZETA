@@ -90,6 +90,12 @@
   .psbox .psprice{font-size:14px}
   .psbox .tag{font-size:11px;font-weight:700;padding:1px 7px;border-radius:20px}
   .psbox .tag.si{background:rgba(62,207,142,.14);color:var(--ok)} .psbox .tag.no{background:var(--panel2);color:var(--muted)}
+  .ps-margen{margin-top:10px;font-size:13px;display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+  .mchip{background:var(--panel2);border:1px solid var(--line);border-radius:20px;padding:3px 10px}
+  .expbox{margin-top:10px}
+  details.expdet{margin-top:10px;border:1px dashed var(--line);border-radius:10px;padding:8px 10px}
+  details.expdet summary{cursor:pointer;color:var(--muted);font-size:13px}
+  .pubopt .hint{font-size:11px;color:var(--muted)}
 </style>
 </head>
 <body>
@@ -121,7 +127,7 @@
   <div id="cards" class="cards"></div>
   <div id="vacio" class="vacio">Introduce un EAN para comparar ambos proveedores.</div>
 
-  <div class="foot">Coste real = precio neto × (1 + IVA% + recargo de equivalencia). Liderpapel no publica IVA: se estima al 21%. Los productos se crean <b>desactivados</b> salvo que marques «Activar al publicar». Si no indicas precio, se calcula como coste × margen.</div>
+  <div class="foot">Coste real = precio neto × (1 + IVA% + recargo de equivalencia). Liderpapel no publica IVA: se estima al 21%. Los productos se crean <b>desactivados</b> salvo que marques «Activar al publicar». Si no indicas precio, se calcula como coste × margen. Todo lo que publicas se añade al monitor con el coste del proveedor.</div>
 </main>
 
 <script src="https://unpkg.com/@zxing/library@0.21.3/umd/index.min.js"></script>
@@ -131,7 +137,9 @@ const PS_OK = {{ 'true' if ps_ok else 'false' }};
 const $ = s => document.querySelector(s);
 const eanEl=$("#ean"), btn=$("#btn"), statusEl=$("#status"), cardsEl=$("#cards"), vacioEl=$("#vacio");
 
-const esc = s => (s??"").toString().replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const esc = s => (s??"").toString().replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+// Argumento JS seguro dentro de un onclick="…" (nombres con comillas o apóstrofos: L'Oréal).
+const ja = v => esc(JSON.stringify(String(v ?? "")));
 const fmt = n => (n===null||n===undefined||n==="")?"—":Number(n).toLocaleString("es-ES",{minimumFractionDigits:2,maximumFractionDigits:2})+" €";
 
 let currentAbort=null;
@@ -234,7 +242,7 @@ function render(d){
   if(ps){
     const ivaPct = (ps.iva_pct!=null && ps.iva_pct!=='') ? Number(ps.iva_pct)
       : (ps.precio_sin_iva>0 ? (Number(ps.precio)/Number(ps.precio_sin_iva)-1)*100 : 21);
-    const eanPs = esc(ps.ean || d.ean || '');
+    const eanPs = esc(ps.ean13 || ps.ean || d.ean || '');
     psbox.innerHTML=`<div class="psbox">
       ${ps.imagen?`<img src="${esc(ps.imagen)}" onerror="this.style.display='none'">`:''}
       <div style="flex:1">
@@ -243,6 +251,10 @@ function render(d){
         <div class="pubopts" data-ean="${eanPs}" data-iva="${ivaPct}">
           <label class="pubopt">EAN
             <input type="text" inputmode="numeric" class="ps-ean" value="${eanPs}">
+          </label>
+          <label class="pubopt" title="EAN con el que lo vende el proveedor (AZETA / Liderpapel), si no es el de la tienda">EAN expositor
+            <input type="text" inputmode="numeric" class="ps-exp" placeholder="(ninguno)"
+                   data-orig="${esc(ps.ean_expositor||'')}" value="${esc(ps.ean_expositor||'')}">
           </label>
           <label class="pubopt">Precio con IVA (€)
             <input type="number" class="ps-precio" min="0" step="0.01" value="${ps.precio!=null?Number(ps.precio).toFixed(2):''}">
@@ -265,6 +277,7 @@ function render(d){
             </select>
           </label>
         </div>
+        <div class="ps-margen"></div>
         <div class="psmsg"></div>
         <button class="pub" style="margin-top:10px;max-width:220px" onclick="guardarPs(this)">Guardar cambios</button>
       </div></div>`;
@@ -273,7 +286,9 @@ function render(d){
     precioEl.addEventListener("input", ()=>{
       const v=parseFloat(precioEl.value);
       sinEl.value = isFinite(v) ? (v/(1+ivaPct/100)).toFixed(2) : "";
+      pintarMargenPs(psbox, v, d);          // margen en vivo al cambiar el precio
     });
+    pintarMargenPs(psbox, parseFloat(precioEl.value), d);
     rellenarImpuestos(psbox.querySelector(".ps-impuesto"));
   }else{ psbox.style.display="none"; psbox.innerHTML=""; }
   const lados=[["azeta",d.azeta],["lider",d.cs]].filter(x=>x[1]);
@@ -316,10 +331,29 @@ function render(d){
     // Clave para localizar el producto al publicar/vigilar: el EAN de la ficha,
     // o el buscado si la ficha no trae EAN (p. ej. cuando el EAN no coincide).
     const eanLoc = p.ean || d.ean || "";
+    // EAN expositor: relacionar esta ficha del proveedor con un producto de la
+    // tienda que tiene OTRO EAN (el del proveedor queda como EAN expositor).
+    let expBloque = "";
+    if(PS_OK && p.ean){
+      const psEan = d.ps ? String(d.ps.ean13||'') : '';
+      const psExp = d.ps ? String(d.ps.ean_expositor||'') : '';
+      if(d.ps && p.ean===psExp){
+        expBloque = `<div class="msg info">🔗 ${esc(p.ean)} es el EAN expositor de «${esc(d.ps.nombre||'')}» en PrestaShop.</div>`;
+      }else if(d.ps && p.ean!==psEan){
+        expBloque = `<div class="expbox"><button class="pub" onclick="vincularExp(this,${ja(provSlug)},${ja(p.ean)},${ja(psEan)})">🔗 Usar ${esc(p.ean)} como EAN expositor de «${esc(d.ps.nombre||'')}»</button><div class="expmsg"></div></div>`;
+      }else if(!d.ps && !existe){
+        expBloque = `<details class="expdet expbox"><summary>🔗 ¿Ya está en PrestaShop con otro EAN?</summary>
+          <div class="pubopts"><label class="pubopt">EAN del producto en la tienda
+            <input type="text" inputmode="numeric" class="exp-tienda" placeholder="p. ej. 8411…">
+            <span class="hint">${esc(p.ean)} quedará como su EAN expositor</span></label></div>
+          <button class="pub" onclick="vincularExp(this,${ja(provSlug)},${ja(p.ean)},'')">Vincular como EAN expositor</button>
+          <div class="expmsg"></div></details>`;
+      }
+    }
     let pubBloque = "";
     if(PS_OK){
       if(existe){
-        pubBloque = `<div class="msg info">Ya existe en PrestaShop · ID ${esc(existe.id||existe.id_product||'?')} · ${existe.activo? 'activo':'desactivado'}</div>`;
+        pubBloque = `<div class="msg info">Ya existe en PrestaShop · ID ${esc(existe.id||existe.id_product||'?')} · ${existe.activo? 'activo':'desactivado'}${margenExiste(existe, p)}</div>`;
       }else{
         pubBloque = `
         <div class="pubopts">
@@ -328,7 +362,9 @@ function render(d){
             <span class="pub-margen" style="font-size:11px;min-height:14px"></span>
           </label>
           <label class="pubopt">IVA
-            <select class="pub-impuesto"><option value="">Por defecto</option></select>
+            <select class="pub-impuesto" data-tasa="${(p.iva_pct!=null && !p.iva_estimado) ? esc(p.iva_pct) : 21}"><option value="">Cargando…</option></select>
+            ${(p.iva_pct!=null && !p.iva_estimado && Number(p.iva_pct)!==21)
+              ? `<span class="hint" style="color:var(--orange)">IVA ${esc(p.iva_pct)} % ${p.proveedor==='AZETA' ? 'según AZETA' : '(dato de AZETA)'}</span>` : ''}
           </label>
           <label class="pubopt">Stock (opcional)
             <input type="number" class="pub-stock" min="0" step="1" placeholder="—">
@@ -341,16 +377,18 @@ function render(d){
               <option value="3">Ambos</option>
             </select>
           </label>
-          ${(cls==='lider' && p.ean_no_coincide && d.ean && d.ean!==p.ean)
-            ? `<label class="pubopt pubopt-check"><input type="checkbox" class="pub-ean-buscado" data-ean="${esc(d.ean)}" checked> Publicar con el EAN buscado (${esc(d.ean)})</label>`
-            : ''}
+          <label class="pubopt">EAN en la tienda (opcional)
+            <input type="text" inputmode="numeric" class="pub-ean-tienda" data-ean-prov="${esc(p.ean||'')}"
+                   placeholder="${esc(p.ean||'el del proveedor')}"
+                   value="${(p.ean_no_coincide && d.ean && d.ean!==p.ean) ? esc(d.ean) : ''}">
+            <span class="hint">Si es distinto, ${esc(p.ean||'el del proveedor')} queda como EAN expositor</span>
+          </label>
           <label class="pubopt pubopt-check"><input type="checkbox" class="pub-activo"> Activar al publicar</label>
         </div>
-        <button class="pub" onclick="publicar(this,'${provSlug}','${esc(eanLoc)}')">Publicar en PrestaShop</button>`;
+        <button class="pub" onclick="publicar(this,${ja(provSlug)},${ja(eanLoc)})">Publicar en PrestaShop</button>`;
       }
     }
-    const nombreAttr = esc(p.nombre||"");
-    const vigilarBtn = `<button class="pub" style="margin-top:8px" onclick="monitorizar(this,'${provSlug}','${esc(eanLoc)}','${nombreAttr}')">👁 Vigilar en el monitor</button>`;
+    const vigilarBtn = `<button class="pub vigilar-btn" style="margin-top:8px" onclick="monitorizar(this,${ja(provSlug)},${ja(eanLoc)},${ja(p.nombre||"")})">👁 Vigilar en el monitor</button>`;
     const avisoEan = p.ean_no_coincide
       ? `<div class="msg err">⚠ El EAN de esta ficha no coincide con el buscado. Revisa que sea el producto correcto antes de publicar.</div>`
       : "";
@@ -361,6 +399,7 @@ function render(d){
       ${avisoEan}
       <div class="coste">${fmt(p.coste_real)} <span class="muted" style="font-size:12px;font-weight:400">coste real/ud</span></div>
       <div class="kv">${kv.map(([k,v])=>`<div class="k">${k}</div><div>${v}</div>`).join("")}</div>
+      ${expBloque}
       <div class="pubmsg"></div>
       ${pubBloque}
       <div class="monmsg"></div>
@@ -378,15 +417,51 @@ function render(d){
 
 // Margen sobre venta: ≥45% excelente, 35–45% correcto, 25–35% justo, <25% bajo.
 function colorMargenPub(m){ return m>=45?'var(--ok)':m>=35?'var(--gold)':m>=25?'var(--orange)':'var(--err)'; }
+const MARGEN_PVP = 1.5;   // mismo que $MARGEN_PVP en crear.php
 function actualizarMargenPub(inp){
   const out=inp.parentNode.querySelector(".pub-margen"); if(!out) return;
   const coste=parseFloat(inp.dataset.coste);
-  const pvp=parseFloat((inp.value||"").replace(",","."));
+  let pvp=parseFloat((inp.value||"").replace(",","."));
+  let auto=false;
+  if((inp.value||"").trim()==="" && isFinite(coste) && coste>0){
+    // Sin precio a mano se publica a coste × 1,5 (regla del módulo): lo mostramos.
+    pvp=Math.round(coste*MARGEN_PVP*100)/100; auto=true;
+  }
   if(!isFinite(pvp) || pvp<=0 || !isFinite(coste) || coste<=0){ out.textContent=""; return; }
   const m=(pvp-coste)/pvp*100;
-  out.textContent=`Margen ${Math.round(m)}% · coste ${fmt(coste)}`;
+  out.textContent= auto ? `Auto: ${fmt(pvp)} · margen ${Math.round(m)}%`
+                        : `Margen ${Math.round(m)}% · coste ${fmt(coste)}`;
   out.style.color=colorMargenPub(m);
   out.style.fontWeight="700";
+}
+
+// Margen de un producto YA en PrestaShop: PVP actual frente al coste real de
+// cada proveedor encontrado (el más barato primero). Misma fórmula que el
+// monitor: (PVP con IVA − coste real) / PVP.
+function costesProveedores(d){
+  const out=[];
+  if(d.azeta && d.azeta.encontrado && Number(d.azeta.coste_real)>0) out.push({prov:"AZETA", coste:Number(d.azeta.coste_real)});
+  if(d.cs && d.cs.encontrado && Number(d.cs.coste_real)>0) out.push({prov:"Liderpapel", coste:Number(d.cs.coste_real)});
+  return out.sort((a,b)=>a.coste-b.coste);
+}
+function htmlMargen(pvp, coste){
+  const m=(pvp-coste)/pvp*100;
+  return `<b style="color:${colorMargenPub(m)}">${Math.round(m)}%</b>`;
+}
+function pintarMargenPs(box, pvp, d){
+  const out=box.querySelector(".ps-margen"); if(!out) return;
+  const costes=costesProveedores(d);
+  if(!costes.length){
+    out.innerHTML='<span class="muted">Margen: sin coste de proveedor (no encontrado en los proveedores consultados).</span>'; return;
+  }
+  if(!isFinite(pvp) || pvp<=0){ out.innerHTML='<span class="muted">Margen: indica el precio con IVA.</span>'; return; }
+  out.innerHTML = '<span class="muted">Margen:</span>' + costes.map(c=>
+    `<span class="mchip">${htmlMargen(pvp,c.coste)} con ${esc(c.prov)} <span class="muted">· coste ${fmt(c.coste)}</span></span>`).join("");
+}
+function margenExiste(existe, p){
+  const pvp=Number(existe.precio), coste=Number(p.coste_real);
+  if(!(pvp>0) || !(coste>0)) return "";
+  return ` · PVP ${fmt(pvp)} · margen ${htmlMargen(pvp, coste)}`;
 }
 
 async function publicar(btnEl, proveedor, ean){
@@ -398,8 +473,9 @@ async function publicar(btnEl, proveedor, ean){
   const precio_con_iva=precioEl && precioEl.value.trim()!=="" ? precioEl.value.trim() : null;
   const id_impuestos=(impEl && impEl.value!=="") ? impEl.value : null;
   const activo=activoEl && activoEl.checked ? 1 : null;
-  const eanBuscadoEl=card.querySelector(".pub-ean-buscado");
-  const ean_publicar=(eanBuscadoEl && eanBuscadoEl.checked) ? eanBuscadoEl.dataset.ean : null;
+  const eanTiendaEl=card.querySelector(".pub-ean-tienda");
+  const eanTienda=eanTiendaEl ? eanTiendaEl.value.replace(/\D/g,"") : "";
+  const ean_publicar=(eanTienda && eanTienda!==(eanTiendaEl.dataset.eanProv||"")) ? eanTienda : null;
   msg.innerHTML='<div class="msg info"><span class="spin"></span> Publicando…</div>';
   try{
     const r=await fetch(`${BASE}/publicar`,{method:"POST",headers:{"Content-Type":"application/json"},
@@ -408,8 +484,16 @@ async function publicar(btnEl, proveedor, ean){
     if(d.ok){
       const extra=[d.stock!=null?`stock ${esc(d.stock)}`:null, d.modo_venta!=null?`modo ${esc(d.modo_venta)}`:null].filter(Boolean).join(' · ');
       const estado = d.activo ? 'activado' : 'desactivado';
-      msg.innerHTML=`<div class="msg ok">Creado en PrestaShop (${estado}) · ID ${esc(d.id_product||'?')}${extra?' · '+extra:''}</div>`;
+      const monTxt = d.vigilado
+        ? ' · 👁 añadido al monitor'
+        : ' · <span style="color:var(--orange)">no se pudo añadir al monitor</span>';
+      const expTxt = d.ean_expositor ? ` · EAN expositor ${esc(d.ean_expositor)}` : '';
+      const imgTxt = (d.imagenes_recibidas) ? ` · ${esc(d.imagenes_subidas??0)}/${esc(d.imagenes_recibidas)} imágenes` : '';
+      msg.innerHTML=`<div class="msg ok">Creado en PrestaShop (${estado}) · ID ${esc(d.id_product||'?')}${extra?' · '+extra:''}${imgTxt}${expTxt}${monTxt}</div>`
+        + (d.aviso ? `<div class="msg info">${esc(d.aviso)}</div>` : '');
       btnEl.remove();
+      const eb=card.querySelector(".expbox"); if(eb) eb.remove();
+      if(d.vigilado){ const vb=card.querySelector(".vigilar-btn"); if(vb) vb.remove(); }
     }else{
       msg.innerHTML=`<div class="msg err">${esc(d.error||'Error al publicar')}</div>`;
       btnEl.disabled=false;
@@ -436,6 +520,14 @@ async function rellenarImpuestos(sel){
   const imps=await getImpuestos();
   if(!imps.length){ sel.innerHTML='<option value="">(no disponible)</option>'; return; }
   sel.innerHTML = imps.map(t=>`<option value="${esc(t.id)}"${Number(t.id)===Number(actual)?' selected':''}>${esc(t.nombre)}</option>`).join("");
+  // Publicar: preseleccionar la regla del tipo indicado (21 %), por su tipo
+  // (módulo >= 1.6.0) o por el nombre "(21%)".
+  if(!actual && sel.dataset.tasa){
+    const tasa=Number(sel.dataset.tasa);
+    const re=new RegExp("(^|[^\\d.,])"+tasa+"([.,]0+)?\\s*%");
+    const t = imps.find(t=>t.tasa!=null && Math.abs(Number(t.tasa)-tasa)<0.01) || imps.find(t=>re.test(t.nombre||""));
+    if(t) sel.value=String(t.id);
+  }
   sel.disabled=false;
 }
 
@@ -451,7 +543,10 @@ async function guardarPs(btnEl){
   const activo = activoSel ? activoSel.value : "";
   const cambiaActivo = activoSel && String(activoSel.value)!==String(activoSel.dataset.orig??activoSel.value);
   if(!ean){ msg.innerHTML='<div class="msg err">Falta el EAN del producto.</div>'; return; }
-  if(ean13==="" && precio==="" && stock==="" && id_impuestos==="" && !cambiaActivo){
+  const expEl=cont.querySelector(".ps-exp");
+  const exp = expEl ? expEl.value.replace(/\D/g,"") : "";
+  const cambiaExp = !!expEl && exp!==(expEl.dataset.orig||"");
+  if(ean13==="" && precio==="" && stock==="" && id_impuestos==="" && !cambiaActivo && !cambiaExp){
     msg.innerHTML='<div class="msg info">Nada que guardar.</div>'; return;
   }
   btnEl.disabled=true;
@@ -460,19 +555,51 @@ async function guardarPs(btnEl){
     const r=await fetch(`${BASE}/actualizar`,{method:"POST",headers:{"Content-Type":"application/json"},
       body:JSON.stringify({ean, ean13:ean13!==""?ean13:null, precio:precio!==""?precio:null,
         stock:stock!==""?stock:null, id_impuestos:id_impuestos!==""?id_impuestos:null,
-        activo:cambiaActivo?activo:null})});
+        activo:cambiaActivo?activo:null, ean_expositor:cambiaExp?exp:null})});
     const d=await r.json();
     if(d.ok){
       const campos=(d.actualizado||[]).join(', ');
       msg.innerHTML=`<div class="msg ok">Guardado en PrestaShop${campos?' · '+esc(campos):''}.</div>`;
       if(d.ean13 && opts) opts.dataset.ean=d.ean13;   // el localizador pasa a ser el nuevo EAN
       if(activoSel) activoSel.dataset.orig=activoSel.value;
+      if(expEl && cambiaExp){ expEl.value=(d.ean_expositor!=null?d.ean_expositor:exp); expEl.dataset.orig=expEl.value; }
     }else{
       msg.innerHTML=`<div class="msg err">${esc(d.error||'Error al guardar')}</div>`;
     }
   }catch(e){
     msg.innerHTML=`<div class="msg err">Error de red: ${esc(e.message)}</div>`;
   }finally{ btnEl.disabled=false; }
+}
+
+// Vincula el EAN del proveedor como EAN expositor de un producto de PrestaShop
+// (por su EAN de tienda). Además lo deja vigilado en el monitor.
+async function vincularExp(btnEl, proveedor, eanExp, eanTienda){
+  const box=btnEl.closest(".expbox"), msg=box.querySelector(".expmsg");
+  if(!eanTienda){
+    const inp=box.querySelector(".exp-tienda");
+    eanTienda = inp ? inp.value.replace(/\D/g,"") : "";
+  }
+  if(!eanTienda){ msg.innerHTML='<div class="msg err">Indica el EAN del producto en PrestaShop.</div>'; return; }
+  btnEl.disabled=true;
+  msg.innerHTML='<div class="msg info"><span class="spin"></span> Vinculando…</div>';
+  try{
+    const r=await fetch(`${BASE}/expositor`,{method:"POST",headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({ean_expositor:eanExp, ean_tienda:eanTienda, proveedor})});
+    const d=await r.json();
+    if(d.ok){
+      const card=btnEl.closest(".card");
+      box.innerHTML=`<div class="msg ok">🔗 ${esc(eanExp)} es ahora el EAN expositor del producto ID ${esc(d.id_product||'?')} (EAN ${esc(d.ean13||eanTienda)})${d.vigilado?' · 👁 en el monitor':''}.</div>`;
+      if(d.vigilado && card){ const vb=card.querySelector(".vigilar-btn"); if(vb) vb.remove(); }
+      const psExp=document.querySelector("#psbox .ps-exp");
+      if(psExp){ psExp.value=d.ean_expositor||eanExp; psExp.dataset.orig=psExp.value; }
+    }else{
+      msg.innerHTML=`<div class="msg err">${esc(d.error||'No se pudo vincular')}</div>`;
+      btnEl.disabled=false;
+    }
+  }catch(e){
+    msg.innerHTML=`<div class="msg err">Error de red: ${esc(e.message)}</div>`;
+    btnEl.disabled=false;
+  }
 }
 
 async function monitorizar(btnEl, proveedor, ean, nombre){
@@ -482,7 +609,10 @@ async function monitorizar(btnEl, proveedor, ean, nombre){
     const r=await fetch(`${BASE}/monitor`,{method:"POST",headers:{"Content-Type":"application/json"},
       body:JSON.stringify({proveedor,ean,nombre})});
     const d=await r.json();
-    if(d.ok){ msg.innerHTML=`<div class="msg ok">Añadido al monitor.</div>`; btnEl.remove(); }
+    if(d.ok){
+      const det = d.coste_real!=null ? ` · coste ${fmt(d.coste_real)}` : (d.aviso ? ` · ${esc(d.aviso)}` : '');
+      msg.innerHTML=`<div class="msg ok">Añadido al monitor${det}.</div>`; btnEl.remove();
+    }
     else{ msg.innerHTML=`<div class="msg err">${esc(d.error||'Error')}</div>`; btnEl.disabled=false; }
   }catch(e){ msg.innerHTML=`<div class="msg err">Error de red: ${esc(e.message)}</div>`; btnEl.disabled=false; }
 }

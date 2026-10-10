@@ -45,12 +45,23 @@ class AplproveedoresconectorOpcionesModuleFrontController extends ModuleFrontCon
             ];
         }
 
-        // Reglas de impuestos
+        // Reglas de impuestos (+ su tipo en el país por defecto, para que la app
+        // pueda preseleccionar la del 21 %)
         $impuestos = [];
+        $address = new Address();
+        $address->id_country = (int) Configuration::get('PS_COUNTRY_DEFAULT');
         foreach (TaxRulesGroup::getTaxRulesGroups(true) as $t) {
+            $tasa = null;
+            try {
+                $tm = TaxManagerFactory::getManager($address, (int) $t['id_tax_rules_group']);
+                $tasa = round((float) $tm->getTaxCalculator()->getTotalRate(), 2);
+            } catch (Exception $e) {
+                $tasa = null;
+            }
             $impuestos[] = [
                 'id' => (int) $t['id_tax_rules_group'],
                 'nombre' => $t['name'],
+                'tasa' => $tasa,
             ];
         }
 
