@@ -246,7 +246,7 @@ function render(d){
     psbox.innerHTML=`<div class="psbox">
       ${ps.imagen?`<img src="${esc(ps.imagen)}" onerror="this.style.display='none'">`:''}
       <div style="flex:1">
-        <div class="pslabel">En tu PrestaShop · ${ps.activo?'<span class="tag si">activo</span>':'<span class="tag no">desactivado</span>'}</div>
+        <div class="pslabel">En tu PrestaShop · ${ps.activo?'<span class="tag si">activo</span>':'<span class="tag no">desactivado</span>'}${(ps.ean13 && String(ps.ean13)!==String(d.ean) && String(ps.ean_expositor||'')===String(d.ean)) ? ` · <span class="tag no">encontrado por su EAN expositor</span>` : ''}</div>
         <div class="psname">${esc(ps.nombre||'(sin nombre)')}</div>
         <div class="pubopts" data-ean="${eanPs}" data-iva="${ivaPct}">
           <label class="pubopt">EAN
@@ -391,7 +391,9 @@ function render(d){
     const vigilarBtn = `<button class="pub vigilar-btn" style="margin-top:8px" onclick="monitorizar(this,${ja(provSlug)},${ja(eanLoc)},${ja(p.nombre||"")})">👁 Vigilar en el monitor</button>`;
     const avisoEan = p.ean_no_coincide
       ? `<div class="msg err">⚠ El EAN de esta ficha no coincide con el buscado. Revisa que sea el producto correcto antes de publicar.</div>`
-      : "";
+      : (p.buscado_con
+          ? `<div class="msg info">🔗 Con ${esc(d.ean)} no aparecía; encontrado con el ${(d.ps && String(d.ps.ean_expositor||'')===String(p.buscado_con)) ? 'EAN expositor' : 'EAN de la tienda'} <b>${esc(p.buscado_con)}</b>.</div>`
+          : "");
     return `<div class="card ${cls}">
       <h2>${tag} ${esBarato?'<span class="barato">★ más barato</span>':''}</h2>
       ${img}

@@ -263,6 +263,44 @@ def buscar(ean: str, con_azeta: bool = True, con_cs: bool = True,
             "azeta": azeta, "cs": cs, "comparacion": comp}
 
 
+def _proveedor_caido(lado: dict | None) -> bool:
+    """El proveedor falló (no disponible / ocupado): reintentar con otro EAN no
+    serviría. 'EAN no coincide' no cuenta como caído."""
+    return bool(lado and lado.get("error") and not lado.get("ean_no_coincide"))
+
+
+def buscar_eans_alternativos(res: dict, alternativos: list) -> dict:
+    """Si algún proveedor no encontró el EAN buscado, se reintenta con otros EAN
+    del MISMO producto (el EAN expositor que tiene en PrestaShop, o su EAN de
+    tienda): a veces el proveedor lo vende con ese otro código.
+    Modifica y devuelve 'res' (formato de buscar()); la ficha encontrada así
+    lleva 'buscado_con' = EAN con el que apareció."""
+    ean = _solo_digitos(res.get("ean"))
+    alts = [a for a in dict.fromkeys(_solo_digitos(x) for x in (alternativos or []))
+            if a and a != ean]
+    cambio = False
+    for alt in alts:
+        falta_az = bool(res.get("azeta")) and not res["azeta"].get("encontrado") \
+            and not _proveedor_caido(res["azeta"])
+        falta_cs = bool(res.get("cs")) and not res["cs"].get("encontrado") \
+            and not _proveedor_caido(res["cs"])
+        if not (falta_az or falta_cs):
+            break
+        r2 = buscar(alt, con_azeta=falta_az, con_cs=falta_cs)
+        for lado, falta in (("azeta", falta_az), ("cs", falta_cs)):
+            n = r2.get(lado)
+            if falta and n and n.get("encontrado"):
+                n["buscado_con"] = alt
+                res[lado] = n
+                cambio = True
+    if cambio:
+        _alinear_iva_cs(res.get("azeta"), res.get("cs"))
+        res["encontrado"] = bool((res.get("azeta") or {}).get("encontrado")
+                                 or (res.get("cs") or {}).get("encontrado"))
+        res["comparacion"] = comparar(res.get("azeta") or {}, res.get("cs") or {})
+    return res
+
+
 # --------------------------------------------------------------------------- #
 # Publicación en PrestaShop (desde AZETA o desde Liderpapel)
 # --------------------------------------------------------------------------- #

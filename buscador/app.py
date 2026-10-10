@@ -46,16 +46,23 @@ def api_buscar():
     # después, en serie, y con PrestaShop lento la búsqueda se alargaba).
     f_ps = bc._pool.submit(bc.ficha_prestashop, ean)
     res = bc.buscar(ean, con_azeta=con_azeta, con_cs=con_cs, forzar_cs=forzar_cs)
+    try:
+        ps = f_ps.result(timeout=20)   # cómo está en PrestaShop (nombre/precio/imagen)
+    except Exception:  # noqa: BLE001
+        ps = None
+
+    # No está en algún proveedor pero SÍ en PrestaShop: se reintenta con su EAN
+    # expositor (y con el de tienda, si se buscó por el expositor), porque a
+    # veces el proveedor lo vende con ese otro código.
+    if ps:
+        bc.buscar_eans_alternativos(res, [ps.get("ean_expositor"), ps.get("ean13")])
 
     # ¿Ya existe en PrestaShop? Todos los EAN encontrados en UNA sola consulta.
     eans = [lado["ean"] for lado in (res.get("azeta"), res.get("cs"))
             if lado and lado.get("encontrado") and lado.get("ean")]
     res["ok"] = True
     res["ya_prestashop"] = bc.ya_en_prestashop_varios(eans)
-    try:
-        res["ps"] = f_ps.result(timeout=20)   # cómo está en PrestaShop (nombre/precio/imagen)
-    except Exception:  # noqa: BLE001
-        res["ps"] = None
+    res["ps"] = ps
     res["ps_ok"] = bc.prestashop_configurado()
     return jsonify(res)
 
