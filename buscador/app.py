@@ -62,6 +62,16 @@ def api_buscar():
             if lado and lado.get("encontrado") and lado.get("ean")]
     res["ok"] = True
     res["ya_prestashop"] = bc.ya_en_prestashop_varios(eans)
+    # Con el EAN buscado no salió la ficha de PrestaShop (p. ej. se buscó por un
+    # EAN que el proveedor usa y la tienda no, y no está como expositor) pero el
+    # producto SÍ existe con el EAN de la ficha del proveedor: se pide la ficha
+    # con ese EAN para poder editarlo, en vez de quedarse solo con el aviso.
+    if not ps:
+        for e in eans:
+            if e != ean and res["ya_prestashop"].get(e):
+                ps = bc.ficha_prestashop(e)
+                if ps:
+                    break
     res["ps"] = ps
     # ¿Ya está en el monitor? (por el EAN buscado, los de las fichas y los de PrestaShop)
     res["vigilados"] = mon.filas_por_eans(
