@@ -116,31 +116,84 @@ class CSSession:
             return False
         return 'type="password"' in low and 'name="user"' in low
 
-    def get(self, params, url=None):
-        """GET autenticado. Si la sesión ha caducado (vuelve el login), se
-        inicia sesión de nuevo UNA vez y se repite; un 5xx lanza CSError para
-        que no se confunda con "producto no encontrado"."""
+    # Esperas (s) antes de cada reintento cuando la respuesta no es la esperada
+    # (429, 5xx o una página que no es de resultados/ficha: interstitial del WAF,
+    # aviso de mantenimiento...). Antes eso se leía como "producto no encontrado".
+    ESPERAS_REINTENTO = (3, 6)
+
+    @staticmethod
+    def describir(r) -> str:
+        """Resumen corto de una respuesta para mensajes de error y logs."""
+        try:
+            m = re.search(r"<title[^>]*>(.*?)</title>", r.text or "", re.S | re.I)
+            titulo = " ".join(m.group(1).split())[:80] if m else "sin título"
+        except Exception:  # noqa: BLE001
+            titulo = "?"
+        try:
+            tam = len(r.content or b"")
+        except Exception:  # noqa: BLE001
+            tam = 0
+        return f"HTTP {r.status_code}, {tam} bytes, «{titulo}»"
+
+    def get(self, params, url=None, valida=None):
+        """GET autenticado.
+
+        - Si la sesión ha caducado (vuelve el login) se inicia sesión de nuevo
+          UNA vez y se repite.
+        - Un 429/5xx, o una página que no pasa 'valida(texto)' (si se indica),
+          se reintenta tras una espera; si persiste lanza CSError, para que no
+          se confunda con "producto no encontrado".
+        """
         self.asegurar_login()
-        r = self._request("GET", url or self.SERVLET, params=params)
-        if r.status_code in (401, 403) or self.parece_login(r):
-            self._logueado = False
-            self.login()
-            r = self._request("GET", url or self.SERVLET, params=params)
+        destino = url or self.SERVLET
+        relogin = False
+        problema = None
+        for espera in (0, *self.ESPERAS_REINTENTO):
+            if espera:
+                time.sleep(espera)
+            r = self._request("GET", destino, params=params)
             if r.status_code in (401, 403) or self.parece_login(r):
-                raise CSError("Liderpapel rechaza la sesión (¿credenciales o WAF?).")
-        if r.status_code >= 500:
-            raise CSError(f"Liderpapel respondió con un error (HTTP {r.status_code}).")
-        return r
+                if relogin:
+                    raise CSError("Liderpapel rechaza la sesión (¿credenciales o WAF?).")
+                relogin = True
+                self._logueado = False
+                self.login()
+                r = self._request("GET", destino, params=params)
+                if r.status_code in (401, 403) or self.parece_login(r):
+                    raise CSError("Liderpapel rechaza la sesión (¿credenciales o WAF?).")
+            if r.status_code == 429 or r.status_code >= 500:
+                problema = f"Liderpapel respondió con un error ({self.describir(r)})."
+            elif valida is not None and not valida(r.text or ""):
+                problema = f"Liderpapel devolvió una página inesperada ({self.describir(r)})."
+            else:
+                return r
+            print(f"[liderpapel] {problema} params={params}", flush=True)
+        raise CSError(problema + " Inténtalo de nuevo en unos segundos.")
+
+    @staticmethod
+    def es_pagina_busqueda(texto: str) -> bool:
+        """La página de búsqueda real trae siempre la cabecera «Resultados de la
+        búsqueda de:» (con o sin resultados; sin ellos dice «No se han obtenido
+        resultados»). Si no está, no es una búsqueda: WAF, mantenimiento, etc."""
+        return ("Resultados de la b" in texto
+                or "No se han obtenido resultados" in texto)
+
+    @staticmethod
+    def es_pagina_ficha(texto: str) -> bool:
+        """La ficha real trae el nombre en <h3 style="color:#adadad"> y el precio
+        en 'precioNeto'."""
+        return bool(re.search(r"color:\s*#adadad", texto, re.I)) or "precioNeto" in texto
 
     def get_producto(self, cod_product):
-        return self.get({"o": "productb2b", "p": "1", "codProduct": str(cod_product)})
+        return self.get({"o": "productb2b", "p": "1", "codProduct": str(cod_product)},
+                        valida=self.es_pagina_ficha)
 
     def buscar(self, patron, exacto=False):
         return self.get({
             "o": "searchprdb2b", "p": "4",
             "flagExact": "ON" if exacto else "",
             "searchString": str(patron),
-        })
+        }, valida=self.es_pagina_busqueda)
 
 
 if __name__ == "__main__":
