@@ -55,6 +55,14 @@
   .est.disponible{background:rgba(62,207,142,.14);color:var(--ok)}
   .est.agotado{background:rgba(244,197,66,.14);color:var(--warn)}
   .est.desaparecido{background:rgba(255,107,107,.14);color:var(--err)}
+  .est.otro_proveedor{background:rgba(167,139,250,.16);color:#b9a4ff}
+  .provst{display:flex;flex-wrap:wrap;gap:6px 14px;margin:6px 0 2px;font-size:13px}
+  .provst .st-pausado,.provst .st-confirmando{color:var(--warn)} .provst .st-parado{color:var(--err)}
+  .provst .st-terminado{color:var(--ok)}
+  .avisojob{border-radius:8px;padding:8px 10px;margin-top:8px;font-size:13px}
+  .avisojob.err{background:rgba(255,107,107,.12);color:var(--err)}
+  .avisojob.warn{background:rgba(244,197,66,.12);color:var(--warn)}
+  .avisojob.ok{background:rgba(62,207,142,.10);color:var(--ok)}
   .est.desconocido,.est{background:var(--panel2);color:var(--muted)}
   .muted{color:var(--muted)} .right{text-align:right}
   td.c-ps.editable{cursor:pointer} td.c-ps.editable:hover{outline:1px dashed var(--accent);outline-offset:-3px;border-radius:6px}
@@ -112,8 +120,11 @@
     <div class="stat"><b>{{ resumen.total }}</b><span>vigilados activos</span></div>
     <a class="stat" href="?proveedor=AZETA"><b>{{ resumen.por_proveedor.get('AZETA', 0) }}</b><span>AZETA</span></a>
     <a class="stat" href="?proveedor=Liderpapel"><b>{{ resumen.por_proveedor.get('Liderpapel', 0) }}</b><span>Liderpapel</span></a>
-    <a class="stat" href="?estado=incidencias" title="Agotados + desaparecidos"><b style="color:{{ 'var(--err)' if resumen.incidencias else 'inherit' }}">{{ resumen.incidencias }}</b><span>incidencias</span></a>
+    <a class="stat" href="?estado=incidencias" title="Agotados + desaparecidos + en el otro proveedor"><b style="color:{{ 'var(--err)' if resumen.incidencias else 'inherit' }}">{{ resumen.incidencias }}</b><span>incidencias</span></a>
     <a class="stat" href="?estado=sin_comprobar" title="Nunca comprobados"><b>{{ resumen.get('sin_comprobar', 0) }}</b><span>sin comprobar</span></a>
+    {% if resumen.get('otro_proveedor') %}
+    <a class="stat" href="?estado=otro_proveedor" title="No están en su proveedor pero sí en el otro: proveedor mal asignado"><b style="color:#b9a4ff">{{ resumen.otro_proveedor }}</b><span>en el otro proveedor</span></a>
+    {% endif %}
   </div>
 
   <div class="bar">
@@ -139,12 +150,23 @@
       <option value="disponible" {{ 'selected' if filtro_estado=='disponible' }}>Disponible</option>
       <option value="agotado" {{ 'selected' if filtro_estado=='agotado' }}>Agotado</option>
       <option value="desaparecido" {{ 'selected' if filtro_estado=='desaparecido' }}>Desaparecido</option>
-      <option value="incidencias" {{ 'selected' if filtro_estado=='incidencias' }}>Incidencias (agotado + desaparecido)</option>
+      <option value="otro_proveedor" {{ 'selected' if filtro_estado=='otro_proveedor' }}>En el otro proveedor</option>
+      <option value="incidencias" {{ 'selected' if filtro_estado=='incidencias' }}>Incidencias (agotado + desaparecido + otro proveedor)</option>
       <option value="sin_comprobar" {{ 'selected' if filtro_estado=='sin_comprobar' }}>Sin comprobar</option>
     </select>
     <button type="submit">Filtrar</button>
     {% if filtro_proveedor or filtro_estado or q %}<a class="lnk" href="{{ request.script_root }}/">Limpiar</a>{% endif %}
   </form>
+
+  {% if filtro_estado == 'otro_proveedor' and vigilados %}
+  <div class="warnbox" id="pasarbox" style="color:inherit">
+    Estos productos <b>no están en su proveedor pero sí en el otro</b> (proveedor mal asignado).
+    Puedes pasarlos uno a uno con «→» o todos a la vez: se vuelven a consultar en el otro proveedor
+    y se guardan ya con su estado, stock y coste.
+    <div style="margin-top:8px"><button class="lnk" type="button" onclick="pasarTodos(this)">⇄ Pasar todos a su proveedor correcto</button>
+    <span class="muted" id="pasarmsg"></span></div>
+  </div>
+  {% endif %}
 
   {% if vigilados %}
   <table id="tabla">
@@ -172,7 +194,7 @@
           {% else %}<span class="muted">—</span>{% endif %}
         </td>
         <td>{{ v.nombre or '—' }}</td>
-        <td class="c-estado"><span class="est {{ v.estado or 'desconocido' }}">{{ v.estado or '—' }}</span></td>
+        <td class="c-estado"><span class="est {{ v.estado or 'desconocido' }}">{% if v.estado == 'otro_proveedor' %}está en {{ 'Liderpapel' if v.proveedor=='AZETA' else 'AZETA' }}{% else %}{{ v.estado or '—' }}{% endif %}</span></td>
         <td class="right c-stock">{{ v.get('stock') if v.get('stock') is not none else '—' }}</td>
         <td class="right c-precio">{{ '%.2f €'|format(v.get('precio_neto')) if v.get('precio_neto') is not none else '—' }}</td>
         <td class="right c-coste">{{ '%.2f €'|format(v.get('coste_real')) if v.get('coste_real') is not none else '—' }}</td>
@@ -239,42 +261,97 @@ const escH = s => (s??"").toString().replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&l
 // --- Comprobación en segundo plano: progreso + incidencias -------------------
 let JOB = {{ job|tojson }};
 let jobTimer = null;
+function estLabel(estado, prov, otro){
+  if(estado === 'otro_proveedor') return 'está en ' + (otro || (prov === 'AZETA' ? 'Liderpapel' : 'AZETA'));
+  return estado || '—';
+}
+const EST_PROV = {en_curso:'comprobando', pausado:'en pausa', confirmando:'confirmando', parado:'PARADO', terminado:'terminado'};
 function pintarJob(j){
   const box = document.getElementById('jobbox'); if(!box) return;
   if(!j || !j.estado || j.estado === 'parado'){ box.innerHTML=''; return; }
   const enCurso = (j.estado === 'en_curso' || j.estado === 'preparando');
-  const pct = j.total ? Math.round(100 * (j.hechos||0) / j.total) : (enCurso ? 0 : 100);
+  const avance = (j.hechos||0) + (j.sin_comprobar||0);
+  const pct = j.total ? Math.round(100 * avance / j.total) : (enCurso ? 0 : 100);
+  const provs = j.proveedores || {};
+  const parados = Object.keys(provs).filter(p => provs[p].estado === 'parado');
   const titulo = enCurso ? '<span class="spin"></span> Comprobando en segundo plano…'
     : j.estado === 'cancelado' ? 'Comprobación cancelada'
     : j.estado === 'error' ? 'La comprobación se detuvo por un error'
+    : parados.length ? 'Comprobación terminada con proveedores parados'
     : 'Comprobación terminada';
   const origen = j.origen === 'cron' ? ' <span class="muted">(automática)</span>' : '';
   const datos = `${j.hechos||0} / ${j.total||0} · <span style="color:var(--ok)">${j.disponibles||0} disponibles</span> · `
     + `<span style="color:${j.n_incidencias?'var(--err)':'inherit'}">${j.n_incidencias||0} incidencias nuevas</span> · `
-    + `${j.n_errores||0} errores`;
+    + `${j.n_errores||0} errores`
+    + (j.falsas_alarmas ? ` · <span title="No aparecían a la primera y sí al confirmar">${j.falsas_alarmas} falsas alarmas evitadas</span>` : '')
+    + (j.n_otro ? ` · <span style="color:#b9a4ff">${j.n_otro} en el otro proveedor</span>` : '')
+    + (j.sin_comprobar ? ` · <span style="color:var(--err)">${j.sin_comprobar} sin comprobar</span>` : '');
+  // Estado de cada proveedor (pausas, confirmación, parado)
+  const lineaProv = Object.keys(provs).map(p => {
+    const s = provs[p]; const est = s.estado || 'en_curso';
+    let extra = '';
+    if(est === 'pausado' && s.hasta){
+      const seg = Math.max(0, Math.round((new Date(s.hasta) - new Date())/1000));
+      extra = ` (reintenta en ${seg} s)`;
+    }
+    return `<span><span class="tag ${escH(p)}">${escH(p)}</span> <span class="st-${escH(est)}">${EST_PROV[est]||escH(est)}${extra}</span> `
+      + `<span class="muted">${s.hechos||0}/${s.total||0}</span></span>`;
+  }).join('');
+  const avisos = Object.keys(provs).filter(p => provs[p].nota).map(p => {
+    const s = provs[p];
+    const cls = s.estado === 'parado' ? 'err' : 'warn';
+    const err = s.error ? `<div class="muted" style="font-size:12px;margin-top:3px">Último error: ${escH(s.error)}</div>` : '';
+    const ayuda = s.estado === 'parado'
+      ? '<div style="margin-top:3px">No se ha marcado nada como desaparecido. Vuelve a lanzar la comprobación más tarde: empezará por los que no se comprobaron.</div>' : '';
+    return `<div class="avisojob ${cls}">${escH(s.nota)}${ayuda}${err}</div>`;
+  }).join('');
   let inc = '';
   if(j.incidencias && j.incidencias.length){
     inc = `<table><thead><tr><th>Proveedor</th><th>EAN</th><th>Nombre</th><th>Estado</th></tr></thead><tbody>`
       + j.incidencias.map(i=>`<tr><td><span class="tag ${escH(i.proveedor)}">${escH(i.proveedor)}</span></td>`
         + `<td><a style="color:inherit" href="?q=${encodeURIComponent(i.ean)}">${escH(i.ean)}</a></td>`
-        + `<td>${escH(i.nombre||'—')}</td><td><span class="est ${escH(i.estado)}">${escH(i.estado)}</span></td></tr>`).join('')
+        + `<td>${escH(i.nombre||'—')}</td><td><span class="est ${escH(i.estado)}">${escH(estLabel(i.estado, i.proveedor, i.en_otro))}</span></td></tr>`).join('')
       + `</tbody></table>`;
     if(j.n_incidencias > j.incidencias.length) inc += `<div class="muted" style="margin-top:6px">… y ${j.n_incidencias - j.incidencias.length} más.</div>`;
   }
+  const otro = (j.n_otro && !enCurso)
+    ? `<div class="avisojob" style="background:rgba(167,139,250,.12);color:#b9a4ff">${j.n_otro} productos no están en su proveedor pero sí en el otro. `
+      + `<a class="lnk" href="?estado=otro_proveedor">Revisarlos y pasarlos de proveedor</a></div>` : '';
   const errs = (j.errores && j.errores.length && !enCurso)
     ? `<details style="margin-top:8px"><summary class="muted" style="cursor:pointer">Ver errores (${j.n_errores})</summary>`
       + j.errores.map(e=>`<div class="muted" style="font-size:12.5px">${escH(e.proveedor)} · ${escH(e.ean)}: ${escH(e.error)}</div>`).join('') + `</details>`
     : '';
-  box.innerHTML = `<div class="job ${enCurso?'':(j.estado==='error'?'err':'fin')}">
+  box.innerHTML = `<div class="job ${enCurso?'':((j.estado==='error'||parados.length)?'err':'fin')}">
     <div class="top"><b>${titulo}</b>${origen}<span class="sp"></span>
       ${enCurso ? '<button class="lnk" type="button" onclick="cancelarJob(this)">Cancelar</button>'
                 : '<a class="lnk" href="?estado=incidencias">Ver todas las incidencias</a> <a class="lnk" href="">Recargar lista</a>'}
     </div>
     <div class="prog"><i style="width:${pct}%"></i></div>
     <div class="muted" style="font-size:13px">${datos}</div>
-    ${inc}${errs}
+    ${lineaProv ? `<div class="provst">${lineaProv}</div>` : ''}
+    ${avisos}${otro}${inc}${errs}
   </div>`;
   const b = document.getElementById('btnComprobar'); if(b) b.disabled = enCurso;
+}
+async function pasarTodos(btn){
+  if(!confirm('¿Pasar todos estos productos a su proveedor correcto? Se consultan de nuevo uno a uno.')) return;
+  btn.disabled = true;
+  const msg = document.getElementById('pasarmsg');
+  let total = 0, saltados = 0;
+  for(let vuelta = 0; vuelta < 1000; vuelta++){
+    msg.innerHTML = `<span class="spin"></span> Pasando… ${total} hechos`;
+    let d;
+    try{
+      const r = await fetch(`${BASE}/pasar-otro-proveedor`, {method:'POST',
+        headers:{'Content-Type':'application/json'}, body:JSON.stringify({proveedor: "{{ filtro_proveedor }}"})});
+      d = await r.json();
+    }catch(e){ msg.textContent = 'Error de red; vuelve a intentarlo.'; btn.disabled = false; return; }
+    total += d.movidos||0; saltados += (d.saltados||[]).length;
+    if(!d.ok){ msg.textContent = `Parado: ${d.error||'error'} (${total} pasados). Vuelve a intentarlo en un rato.`; btn.disabled = false; return; }
+    if(!d.restantes || (!d.movidos && !(d.saltados||[]).length)) break;
+  }
+  msg.textContent = `Hecho: ${total} pasados de proveedor` + (saltados ? `, ${saltados} ya no estaban en el otro (quedan como desaparecidos)` : '') + '. Recargando…';
+  setTimeout(()=>location.reload(), 1500);
 }
 async function pollJob(){
   try{
@@ -403,7 +480,7 @@ async function comprobar(btn){
       headers:{'Content-Type':'application/json'}, body:JSON.stringify({ean, proveedor:prov})});
     const d = await r.json();
     if(d.ok){
-      tr.querySelector('.c-estado').innerHTML = `<span class="est ${d.estado||'desconocido'}">${d.estado||'—'}</span>`;
+      tr.querySelector('.c-estado').innerHTML = `<span class="est ${d.estado||'desconocido'}">${escH(estLabel(d.estado, prov, d.en_otro))}</span>`;
       tr.querySelector('.c-stock').textContent  = (d.stock===null||d.stock===undefined) ? '—' : d.stock;
       tr.querySelector('.c-precio').textContent = fmtEur(d.precio_neto);
       tr.querySelector('.c-coste').textContent  = fmtEur(d.coste_real);

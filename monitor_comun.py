@@ -88,7 +88,7 @@ def ean_consulta(v: dict) -> str:
     return exp or str(v.get("ean") or "").strip()
 
 
-ESTADOS_INCIDENCIA = ("agotado", "desaparecido")
+ESTADOS_INCIDENCIA = ("agotado", "desaparecido", "otro_proveedor")
 
 
 def _filtro_estado(params: dict, estado: str) -> None:
@@ -146,8 +146,9 @@ def resumen() -> dict:
         "total": base,
         "AZETA": {**base, "proveedor": "eq.AZETA"},
         "Liderpapel": {**base, "proveedor": "eq.Liderpapel"},
-        "incidencias": {**base, "estado": "in.(agotado,desaparecido)"},
+        "incidencias": {**base, "estado": "in.(%s)" % ",".join(ESTADOS_INCIDENCIA)},
         "sin_comprobar": {**base, "ultima_revision": "is.null"},
+        "otro_proveedor": {**base, "estado": "eq.otro_proveedor"},
     }
     # En paralelo: antes eran 4 peticiones seguidas en cada carga de la página.
     claves = list(filtros)
@@ -158,6 +159,7 @@ def resumen() -> dict:
         "por_proveedor": {"AZETA": n["AZETA"], "Liderpapel": n["Liderpapel"]},
         "incidencias": n["incidencias"],
         "sin_comprobar": n["sin_comprobar"],
+        "otro_proveedor": n["otro_proveedor"],
     }
 
 
@@ -443,28 +445,55 @@ _pool = ThreadPoolExecutor(max_workers=6)
 _pool_lectura = ThreadPoolExecutor(max_workers=5)
 
 
-def _comprobar_uno(v: dict) -> dict:
-    ean = v.get("ean")                 # clave (EAN de PrestaShop)
-    ean_prov = ean_consulta(v)         # con el que se pregunta al proveedor
-    prov = normalizar_proveedor(v.get("proveedor"))
-    estado_previo = v.get("estado")
+# 'otro_proveedor': no está en su proveedor pero SÍ en el otro (proveedor mal
+# asignado). Se guarda como estado para que no se pierda y se pueda filtrar.
+ESTADOS_AUSENTE = ("desaparecido", "otro_proveedor")
+
+
+def otro_proveedor(prov: str) -> str:
+    return "Liderpapel" if normalizar_proveedor(prov) == "AZETA" else "AZETA"
+
+
+def _consultar(prov: str, ean_prov: str) -> dict:
+    """Ficha normalizada del proveedor (formato busqueda_comun). Nunca lanza."""
     try:
         if prov == "AZETA":
-            norm = bc.norm_azeta(bc.buscar_azeta(ean_prov))
-        else:
-            norm = bc.norm_cs(bc.buscar_cs(ean_prov))
+            return bc.norm_azeta(bc.buscar_azeta(ean_prov))
+        return bc.norm_cs(bc.buscar_cs(ean_prov))
     except Exception as e:  # noqa: BLE001
-        return {"ean": ean, "proveedor": prov, "error": str(e)}
+        return {"encontrado": False, "error": f"Error consultando {prov}: {e}"}
 
-    if norm.get("error") and not norm.get("encontrado"):
-        # No se toca el estado (no sabemos si está), pero sí la fecha de
-        # revisión: si no, en las comprobaciones por tandas (cron) las filas
-        # que fallan siempre encabezarían la cola y no avanzaría.
-        from datetime import datetime, timezone
-        _patch(ean, prov, {"ultima_revision": datetime.now(timezone.utc).isoformat()})
-        return {"ean": ean, "proveedor": prov, "error": norm.get("error")}
 
+def fallo_proveedor(norm: dict) -> bool:
+    """True si el proveedor NO ha respondido bien (caído, bloqueado, ocupado...):
+    no sabemos si el producto está, así que NO se toca su estado.
+    'EAN no coincide' (Liderpapel) es un "no encontrado" normal, no un fallo."""
+    return bool(norm.get("error")) and not norm.get("encontrado") \
+        and not norm.get("ean_no_coincide")
+
+
+def buscar_en_otro(v: dict, prov: str) -> dict | None:
+    """Un producto que no está en su proveedor, ¿está en el otro? (p. ej. un
+    Liderpapel vigilado como AZETA). Devuelve {proveedor, ean, nombre,
+    disponible, ya_vigilado} o None (tampoco está, o el otro no responde)."""
+    otro = otro_proveedor(prov)
+    eans = [x for x in (ean_consulta(v), str(v.get("ean") or "").strip()) if x]
+    for e in dict.fromkeys(eans):
+        n = _consultar(otro, e)
+        if n.get("encontrado"):
+            return {"proveedor": otro, "ean": e, "nombre": n.get("nombre"),
+                    "disponible": bool(n.get("disponible")),
+                    "ya_vigilado": obtener(v.get("ean"), otro) is not None}
+    return None
+
+
+def _guardar(v: dict, prov: str, norm: dict, en_otro: dict | None = None) -> dict:
+    """Guarda el resultado de una consulta VÁLIDA y devuelve el resumen."""
+    ean = v.get("ean")
+    estado_previo = v.get("estado")
     estado = _estado_desde_ficha(norm)
+    if estado == "desaparecido" and en_otro:
+        estado = "otro_proveedor"
     nombre = norm.get("nombre") or v.get("nombre")
     actualizar_estado(ean, prov, estado, nombre=nombre,
                       stock=norm.get("stock"),
@@ -474,11 +503,24 @@ def _comprobar_uno(v: dict) -> dict:
     incidencia = None
     if estado != "disponible" and estado_previo != estado:
         incidencia = {"ean": ean, "proveedor": prov, "estado": estado, "nombre": nombre}
+        if en_otro:
+            incidencia["en_otro"] = en_otro["proveedor"]
     return {"ean": ean, "ean_expositor": v.get("ean_expositor"),
-            "ean_consultado": ean_prov,
+            "ean_consultado": ean_consulta(v),
             "proveedor": prov, "estado": estado, "nombre": nombre,
             "stock": norm.get("stock"), "precio_neto": norm.get("precio_neto"),
-            "coste_real": norm.get("coste_real"), "incidencia": incidencia}
+            "coste_real": norm.get("coste_real"), "incidencia": incidencia,
+            "en_otro": en_otro}
+
+
+def _comprobar_uno(v: dict, mirar_otro: bool = True) -> dict:
+    """Comprobación de UNA fila (botón ↻). Si el proveedor falla no se toca nada."""
+    prov = normalizar_proveedor(v.get("proveedor"))
+    norm = _consultar(prov, ean_consulta(v))
+    if fallo_proveedor(norm):
+        return {"ean": v.get("ean"), "proveedor": prov, "error": norm.get("error")}
+    en_otro = buscar_en_otro(v, prov) if (mirar_otro and not norm.get("encontrado")) else None
+    return _guardar(v, prov, norm, en_otro)
 
 
 def comprobar_uno(ean: str, proveedor: str) -> dict:
@@ -510,26 +552,93 @@ def cambiar_proveedor(ean: str, proveedor_viejo: str, proveedor_nuevo: str) -> b
     return True
 
 
+def pasar_al_otro(lote: int = 8, proveedor: str | None = None) -> dict:
+    """Pasa al otro proveedor las filas en estado 'otro_proveedor' (de 'lote' en
+    'lote', para que cada petición web sea corta; el navegador repite hasta 0).
+    Antes de moverla se vuelve a consultar en el otro proveedor: así la fila
+    nueva queda ya con estado/stock/coste y con el EAN correcto (si se encontró
+    por el EAN de tienda, se quita el expositor). Si ya no está, no se mueve."""
+    filtros = {"activo": "eq.true", "estado": "eq.otro_proveedor"}
+    if proveedor:
+        filtros["proveedor"] = f"eq.{normalizar_proveedor(proveedor)}"
+    filas = listar(proveedor=proveedor, estado="otro_proveedor", solo_activos=True,
+                   limite=lote, orden="id.asc")
+    movidos, saltados, error = 0, [], None
+    for v in filas:
+        viejo = normalizar_proveedor(v.get("proveedor"))
+        nuevo = otro_proveedor(viejo)
+        ean = str(v.get("ean") or "")
+        norm, ean_ok = None, None
+        for e in dict.fromkeys(x for x in (ean_consulta(v), ean) if x):
+            n = _consultar(nuevo, e)
+            if fallo_proveedor(n):
+                error = n.get("error")
+                break
+            if n.get("encontrado"):
+                norm, ean_ok = n, e
+                break
+        if error:
+            break                              # el otro proveedor no responde: parar
+        if not norm:
+            # Ya no aparece en el otro: se deja como desaparecido en el suyo.
+            _patch(ean, viejo, {"estado": "desaparecido"})
+            saltados.append(ean)
+            continue
+        ok = añadir(ean, nuevo, nombre=norm.get("nombre") or v.get("nombre"),
+                    origen=v.get("origen") or "manual", id_prestashop=v.get("id_prestashop"),
+                    ean_expositor=(ean_ok if ean_ok != ean else ""),
+                    estado=_estado_desde_ficha(norm), stock=norm.get("stock"),
+                    precio_neto=norm.get("precio_neto"), coste_real=norm.get("coste_real"),
+                    ultima_revision=_dt.now(_tz.utc).isoformat())
+        if ok and quitar(ean, viejo):
+            movidos += 1
+            _insertar_historico({"ean": ean, "proveedor": nuevo, "estado": _estado_desde_ficha(norm),
+                                 "stock": norm.get("stock"), "precio_neto": norm.get("precio_neto"),
+                                 "coste_real": norm.get("coste_real"),
+                                 "nombre": norm.get("nombre") or v.get("nombre")})
+    return {"ok": error is None, "movidos": movidos, "saltados": saltados,
+            "error": error, "restantes": _contar(filtros)}
+
+
 # --------------------------------------------------------------------------- #
 # Comprobación masiva EN SEGUNDO PLANO (una sola a la vez, con progreso)
 # --------------------------------------------------------------------------- #
 # Antes "Comprobar todos" se hacía dentro de la petición: con miles de filas
 # tardaba horas, el navegador daba error y nunca se veía el resultado.
 import threading as _threading
-from datetime import datetime as _dt, timezone as _tz
+import time as _time
+from datetime import datetime as _dt, timezone as _tz, timedelta as _td
 
 _JOB_LOCK = _threading.Lock()
 _JOB: dict = {"estado": "parado"}
 _MAX_INCIDENCIAS = 300
+_MAX_OTRO = 500
+
+# Protección ante bloqueos de los proveedores (2026-10-24). El 16-10 una
+# comprobación marcó como desaparecidos ~2000 productos que existían: AZETA y
+# Liderpapel respondían con páginas de bloqueo que se leían como "no encontrado".
+# Ahora (además de que los scrapers ya distinguen esas páginas y dan error):
+#  - Si un proveedor falla, se PAUSA (PAUSAS_FALLO, cada vez más larga) y sigue;
+#    si tras todas las pausas sigue fallando se PARA solo ese proveedor, y lo que
+#    queda sin comprobar no se toca (ni estado ni fecha de revisión).
+#  - Un producto que NO estaba desaparecido y ahora no aparece no se marca en el
+#    momento: se vuelve a consultar al final, pasados ESPERA_CONFIRMAR segundos.
+#  - Tras RACHA_SOSPECHOSA "no encontrados" seguidos se consulta un producto
+#    TESTIGO (el último que sí se encontró): si ya no aparece, es un bloqueo
+#    silencioso y se trata como fallo del proveedor.
+#  - Lo que no está en su proveedor se busca en el otro (estado 'otro_proveedor').
+PAUSAS_FALLO = (60, 120, 300)     # segundos
+ESPERA_OCUPADO = 5                # la sesión la está usando otra consulta
+MAX_OCUPADO = 6                   # ocupado tantas veces seguidas = fallo
+ESPERA_CONFIRMAR = 90             # segundos antes de confirmar un desaparecido nuevo
+RACHA_SOSPECHOSA = 5
 
 
 def estado_comprobacion() -> dict:
     """Copia del estado del trabajo (para la barra de progreso)."""
+    import copy as _copy
     with _JOB_LOCK:
-        j = dict(_JOB)
-        j["incidencias"] = list(_JOB.get("incidencias") or [])
-        j["errores"] = list(_JOB.get("errores") or [])
-    return j
+        return _copy.deepcopy(_JOB)
 
 
 def iniciar_comprobacion(proveedor: str | None = None, estado: str | None = None,
@@ -544,6 +653,8 @@ def iniciar_comprobacion(proveedor: str | None = None, estado: str | None = None
         _JOB.update({"estado": "preparando", "origen": origen, "proveedor": proveedor,
                      "filtro_estado": estado, "total": 0, "hechos": 0, "disponibles": 0,
                      "n_incidencias": 0, "n_errores": 0, "incidencias": [], "errores": [],
+                     "n_otro": 0, "otro": [], "falsas_alarmas": 0, "sin_comprobar": 0,
+                     "proveedores": {},
                      "inicio": _dt.now(_tz.utc).isoformat(), "fin": None, "cancelar": False})
     try:
         filas = listar(proveedor=proveedor, estado=estado, solo_activos=True, limite=maximo,
@@ -566,43 +677,254 @@ def cancelar_comprobacion() -> bool:
     return True
 
 
+def _cancelado() -> bool:
+    with _JOB_LOCK:
+        return bool(_JOB.get("cancelar"))
+
+
+def _dormir(segundos: float) -> bool:
+    """Espera 'segundos' salvo que se cancele el trabajo (False si se canceló)."""
+    fin = _time.monotonic() + segundos
+    while True:
+        if _cancelado():
+            return False
+        resto = fin - _time.monotonic()
+        if resto <= 0:
+            return True
+        _time.sleep(min(1.0, resto))
+
+
+def _prov_set(prov: str, **cambios) -> None:
+    with _JOB_LOCK:
+        _JOB.setdefault("proveedores", {}).setdefault(prov, {}).update(cambios)
+
+
+def _anotar(prov: str, v: dict, r: dict | None = None, error: str | None = None) -> None:
+    """Cuenta un producto terminado en el progreso global y en el del proveedor."""
+    with _JOB_LOCK:
+        _JOB["hechos"] += 1
+        p = _JOB["proveedores"].setdefault(prov, {})
+        p["hechos"] = p.get("hechos", 0) + 1
+        if error:
+            _JOB["n_errores"] += 1
+            if len(_JOB["errores"]) < 50:
+                _JOB["errores"].append({"ean": v.get("ean"), "proveedor": prov,
+                                        "error": str(error)[:200]})
+            return
+        if not r:
+            return
+        if r.get("estado") == "disponible":
+            _JOB["disponibles"] += 1
+        if r.get("falsa_alarma"):
+            _JOB["falsas_alarmas"] += 1
+        if r.get("incidencia"):
+            _JOB["n_incidencias"] += 1
+            if len(_JOB["incidencias"]) < _MAX_INCIDENCIAS:
+                _JOB["incidencias"].append(r["incidencia"])
+        if r.get("en_otro"):
+            _JOB["n_otro"] += 1
+            if len(_JOB["otro"]) < _MAX_OTRO:
+                o = r["en_otro"]
+                _JOB["otro"].append({"ean": r.get("ean"), "proveedor": prov,
+                                     "nombre": r.get("nombre") or o.get("nombre"),
+                                     "otro": o.get("proveedor"),
+                                     "disponible": o.get("disponible"),
+                                     "ya_vigilado": o.get("ya_vigilado")})
+
+
+class _Freno:
+    """Pausas crecientes cuando un proveedor falla; avisa cuando hay que pararlo."""
+
+    def __init__(self, prov: str):
+        self.prov = prov
+        self.fallos = 0
+        self.ocupado = 0
+        self.ultimo_error = None
+
+    def ok(self) -> None:
+        if self.fallos:
+            _prov_set(self.prov, estado="en_curso", nota=None, hasta=None)
+        self.fallos = 0
+        self.ocupado = 0
+
+    def fallo(self, error) -> bool:
+        """Registra un fallo y espera. False = hay que parar este proveedor
+        (o se ha cancelado el trabajo)."""
+        error = str(error or "error desconocido")
+        if "ocupado" in error.lower() and self.ocupado < MAX_OCUPADO:
+            self.ocupado += 1                 # otra consulta tiene la sesión
+            return _dormir(ESPERA_OCUPADO)
+        self.ocupado = 0
+        self.fallos += 1
+        self.ultimo_error = error
+        if self.fallos > len(PAUSAS_FALLO):
+            return False
+        pausa = PAUSAS_FALLO[self.fallos - 1]
+        print(f"[monitor] {self.prov} falla ({error[:150]}); pausa de {pausa} s", flush=True)
+        _prov_set(self.prov, estado="pausado", error=error[:200],
+                  nota=f"{self.prov} no responde bien; pausa {self.fallos}/{len(PAUSAS_FALLO)} "
+                       f"de {pausa} s y se reintenta.",
+                  hasta=(_dt.now(_tz.utc) + _td(seconds=pausa)).isoformat())
+        return _dormir(pausa)
+
+
+def _trabajo_proveedor(prov: str, filas: list[dict]) -> None:
+    """Comprueba las filas de UN proveedor, de una en una, con freno y confirmación."""
+    freno = _Freno(prov)
+    testigo = None          # EAN encontrado hace poco: sirve para detectar bloqueos silenciosos
+    racha = 0               # "no encontrados" seguidos desde el último testigo
+    por_confirmar: list[dict] = []
+    aplazadas: list[dict] = []
+    ultimo_visto = 0.0
+
+    def parar(pendientes: list[dict]) -> None:
+        with _JOB_LOCK:
+            _JOB["sin_comprobar"] = _JOB.get("sin_comprobar", 0) + len(pendientes)
+            p = _JOB["proveedores"].setdefault(prov, {})
+            n = p["sin_comprobar"] = (p.get("sin_comprobar") or 0) + len(pendientes)
+        _prov_set(prov, estado="parado", hasta=None,
+                  error=(freno.ultimo_error or "")[:200],
+                  nota=(f"{prov} sigue fallando tras {len(PAUSAS_FALLO)} pausas: se ha parado "
+                        f"su comprobación. {n} productos quedan sin comprobar (sin tocar)."))
+        print(f"[monitor] {prov} PARADO: {n} sin comprobar. Último error: {freno.ultimo_error}",
+              flush=True)
+
+    def testigo_ok() -> bool | None:
+        """¿Sigue apareciendo el testigo? True/False, o None si no hay testigo
+        o el proveedor ha fallado al consultarlo (lo gestiona el freno)."""
+        if not testigo:
+            return None
+        nt = _consultar(prov, testigo)
+        if fallo_proveedor(nt):
+            return None if freno.fallo(nt.get("error")) else False
+        return bool(nt.get("encontrado"))
+
+    # --- 1.ª pasada (y 2.ª para las que fallaron por el proveedor) ----------
+    cola, i, segunda = list(filas), 0, False
+    while True:
+        if i >= len(cola):
+            if aplazadas and not segunda:
+                cola, aplazadas, i, segunda = aplazadas, [], 0, True
+                continue
+            break
+        if _cancelado():
+            return
+        v = cola[i]
+        norm = _consultar(prov, ean_consulta(v))
+
+        if fallo_proveedor(norm):
+            if not segunda:
+                aplazadas.append(v)          # se reintenta al final
+            else:
+                # Ya falló una vez: error de ESTE producto. Se apunta y se le
+                # pone fecha de revisión para que el cron no se atasque en él.
+                _anotar(prov, v, error=norm.get("error"))
+                _patch(v.get("ean"), prov, {"ultima_revision": _dt.now(_tz.utc).isoformat()})
+            i += 1
+            if not freno.fallo(norm.get("error")):
+                if not _cancelado():
+                    parar(cola[i:] + aplazadas + por_confirmar)
+                return
+            continue
+
+        freno.ok()
+        i += 1
+        if norm.get("encontrado"):
+            testigo, racha = ean_consulta(v), 0
+            _anotar(prov, v, _guardar(v, prov, norm))
+            continue
+
+        # No encontrado. ¿Racha sospechosa? -> comprobar el testigo.
+        racha += 1
+        if racha >= RACHA_SOSPECHOSA:
+            racha = 0
+            if testigo_ok() is False:
+                print(f"[monitor] {prov}: el testigo {testigo} ya no aparece -> posible bloqueo",
+                      flush=True)
+                # Esta fila (y las recientes por confirmar) se revisan luego.
+                aplazadas.append(v)
+                if not freno.fallo(f"{prov} deja de encontrar productos que sí existen "
+                                   f"(testigo {testigo}): posible bloqueo"):
+                    if not _cancelado():
+                        parar(cola[i:] + aplazadas + por_confirmar)
+                    return
+                continue
+
+        if v.get("estado") not in ESTADOS_AUSENTE:
+            por_confirmar.append(v)          # nuevo "desaparecido": confirmar luego
+            ultimo_visto = _time.monotonic()
+            continue
+        # Ya estaba ausente y sigue sin estar: ¿está en el otro proveedor?
+        _anotar(prov, v, _guardar(v, prov, norm, buscar_en_otro(v, prov)))
+
+    if segunda and aplazadas:
+        # Filas que fallaron en la 2.ª pasada por un bloqueo puntual: quedan sin
+        # tocar para la próxima comprobación.
+        with _JOB_LOCK:
+            _JOB["sin_comprobar"] = _JOB.get("sin_comprobar", 0) + len(aplazadas)
+            p = _JOB["proveedores"].setdefault(prov, {})
+            p["sin_comprobar"] = (p.get("sin_comprobar") or 0) + len(aplazadas)
+
+    # --- Confirmación de los "desaparecidos nuevos" -------------------------
+    if por_confirmar:
+        _prov_set(prov, estado="confirmando", hasta=None,
+                  nota=f"Confirmando {len(por_confirmar)} posibles desaparecidos…")
+        espera = ESPERA_CONFIRMAR - (_time.monotonic() - ultimo_visto)
+        if espera > 0 and not _dormir(espera):
+            return
+        j, racha = 0, 0
+        while j < len(por_confirmar):
+            if _cancelado():
+                return
+            if racha >= RACHA_SOSPECHOSA or (j == 0 and testigo):
+                racha = 0
+                t = testigo_ok()
+                if t is False:
+                    if not freno.fallo(f"{prov} deja de encontrar productos que sí existen "
+                                       f"(testigo {testigo}): posible bloqueo"):
+                        if not _cancelado():
+                            parar(por_confirmar[j:])
+                        return
+                    continue
+            v = por_confirmar[j]
+            norm = _consultar(prov, ean_consulta(v))
+            if fallo_proveedor(norm):
+                if not freno.fallo(norm.get("error")):
+                    if not _cancelado():
+                        parar(por_confirmar[j:])
+                    return
+                continue                      # el mismo producto, tras la pausa
+            freno.ok()
+            j += 1
+            if norm.get("encontrado"):
+                r = _guardar(v, prov, norm)
+                r["falsa_alarma"] = True      # la 1.ª vez no salió: se ha evitado un falso desaparecido
+                testigo, racha = ean_consulta(v), 0
+            else:
+                racha += 1
+                r = _guardar(v, prov, norm, buscar_en_otro(v, prov))
+            _anotar(prov, v, r)
+
+    _prov_set(prov, estado="terminado", nota=None, hasta=None)
+
+
 def _trabajo_comprobacion(filas: list[dict]) -> None:
-    from concurrent.futures import as_completed
     try:
-        # 3 hilos: AZETA y Liderpapel van en paralelo entre sí (cada proveedor
-        # usa una sola sesión, así que dentro de cada uno van de una en una).
-        with ThreadPoolExecutor(max_workers=3) as ex:
-            pendientes = set()
-            it = iter(filas)
-            for v in it:
-                pendientes.add(ex.submit(_comprobar_uno, v))
-                if len(pendientes) >= 6:
-                    break
-            while pendientes:
-                hecho = next(as_completed(pendientes))
-                pendientes.discard(hecho)
-                try:
-                    r = hecho.result()
-                except Exception as e:  # noqa: BLE001
-                    r = {"ean": "?", "proveedor": "?", "error": str(e)}
-                with _JOB_LOCK:
-                    _JOB["hechos"] += 1
-                    if r.get("error"):
-                        _JOB["n_errores"] += 1
-                        if len(_JOB["errores"]) < 50:
-                            _JOB["errores"].append({"ean": r.get("ean"), "proveedor": r.get("proveedor"),
-                                                    "error": str(r.get("error"))[:200]})
-                    elif r.get("estado") == "disponible":
-                        _JOB["disponibles"] += 1
-                    if r.get("incidencia"):
-                        _JOB["n_incidencias"] += 1
-                        if len(_JOB["incidencias"]) < _MAX_INCIDENCIAS:
-                            _JOB["incidencias"].append(r["incidencia"])
-                    cancelar = _JOB.get("cancelar")
-                if not cancelar:
-                    siguiente = next(it, None)
-                    if siguiente is not None:
-                        pendientes.add(ex.submit(_comprobar_uno, siguiente))
+        # Un hilo por proveedor: AZETA y Liderpapel van en paralelo entre sí, y
+        # dentro de cada uno de una en una (una sola sesión; AZETA además va
+        # limitada a 1 petición cada 2 s por Cloudflare).
+        grupos: dict[str, list] = {}
+        for v in filas:
+            grupos.setdefault(normalizar_proveedor(v.get("proveedor")), []).append(v)
+        with _JOB_LOCK:
+            _JOB["proveedores"] = {p: {"total": len(g), "hechos": 0, "estado": "en_curso",
+                                       "nota": None} for p, g in grupos.items()}
+        hilos = [_threading.Thread(target=_trabajo_proveedor, args=(p, g), daemon=True,
+                                   name=f"monitor-{p}") for p, g in grupos.items()]
+        for h in hilos:
+            h.start()
+        for h in hilos:
+            h.join()
         with _JOB_LOCK:
             _JOB["estado"] = "cancelado" if _JOB.get("cancelar") else "terminado"
     except Exception as e:  # noqa: BLE001

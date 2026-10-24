@@ -290,6 +290,25 @@ def parsear_ficha(html: str, ean_buscado: str | None = None, url: str | None = N
     }
 
 
+def es_no_encontrado(resp) -> bool:
+    """AZETA, cuando de verdad no tiene un artículo, redirige SIEMPRE a
+    /html/lib/librosNoEncontrados/lista.php (verificado 2026-10-24). Es la única
+    respuesta que se acepta como "no encontrado"."""
+    return "librosNoEncontrados" in (getattr(resp, "url", "") or "")
+
+
+def _describir(resp) -> str:
+    """Resumen corto de una respuesta para mensajes de error y logs."""
+    try:
+        m = re.search(r"<title[^>]*>(.*?)</title>", resp.text or "", re.S | re.I)
+        titulo = " ".join(m.group(1).split())[:80] if m else "sin título"
+    except Exception:  # noqa: BLE001
+        titulo = "?"
+    from urllib.parse import urlparse
+    ruta = urlparse(getattr(resp, "url", "") or "").path[-60:]
+    return f"HTTP {resp.status_code}, «{titulo}», {ruta}"
+
+
 def buscar_producto(patron: str, sesion: AzetaSession | None = None,
                     aplicar_recargo: bool | None = None) -> dict:
     """Busca por EAN/ISBN/texto y devuelve la ficha del producto como dict."""
@@ -307,6 +326,11 @@ def buscar_producto(patron: str, sesion: AzetaSession | None = None,
     resp = sesion.get(url)
     datos = parsear_ficha(resp.text, ean_buscado=patron, url=resp.url,
                           aplicar_recargo=aplicar_recargo)
+    if not datos.get("encontrado") and not es_no_encontrado(resp):
+        # Ni ficha ni la página de "no encontrados" de AZETA: es otra cosa
+        # (desafío de Cloudflare, mantenimiento, sesión rara...). Antes se leía
+        # como "producto no encontrado" y el monitor lo marcaba desaparecido.
+        raise AzetaError(f"AZETA devolvió una página inesperada ({_describir(resp)}).")
     datos["patron"] = patron
     datos["url_ficha"] = resp.url
     return datos

@@ -95,6 +95,7 @@ def comprobar_uno():
         from datetime import datetime, timezone
         return jsonify({"ok": True, "estado": r.get("estado"), "stock": r.get("stock"),
                         "ean_consultado": r.get("ean_consultado"),
+                        "en_otro": (r.get("en_otro") or {}).get("proveedor"),
                         "precio_neto": r.get("precio_neto"), "coste_real": r.get("coste_real"),
                         "ps_pvp": ps_pvp, "ps_en_tienda": ps_en_tienda,
                         "ultima_revision": datetime.now(timezone.utc).isoformat()})
@@ -131,6 +132,17 @@ def cambiar_proveedor():
         else:
             flash("No se pudo cambiar el proveedor.", "error")
     return redirect(request.referrer or url_for("index"))
+
+
+@app.route("/pasar-otro-proveedor", methods=["POST"])
+def pasar_otro_proveedor():
+    """Pasa un lote de filas 'otro_proveedor' a su proveedor correcto (JSON).
+    La página lo llama en bucle hasta que no quedan."""
+    data = request.get_json(silent=True) or {}
+    try:
+        return jsonify(mon.pasar_al_otro(proveedor=data.get("proveedor") or None))
+    except Exception as e:  # noqa: BLE001
+        return jsonify({"ok": False, "error": str(e), "movidos": 0})
 
 
 @app.route("/add", methods=["POST"])
